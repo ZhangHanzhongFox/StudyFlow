@@ -96,10 +96,15 @@ boundaries while parallel development is underway.
 
 ## Current runtime state
 
+The Agent / Workflow implementation can classify and decompose assessments
+using a provider-neutral structured-output boundary, a credential-free fake,
+and deterministic templates. Its canonical task outputs and affected-task
+analysis are ready to inject through `PlanningPipeline`.
+
 The FastAPI app currently exposes the validated shared mock data. `POST /plan`
 returns the baseline mock schedule so the frontend can integrate immediately.
-`POST /replan` intentionally returns HTTP 501 until real A and B implementations
-are injected through `PlanningPipeline`.
+`POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
+both injected through `PlanningPipeline`.
 
 No endpoint currently writes to fixture files. New planning events are held in
 memory and reset when the process restarts.

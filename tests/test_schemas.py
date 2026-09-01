@@ -59,6 +59,18 @@ def test_assessment_accepts_canonical_values_and_serializes_iso_datetimes() -> N
     assert '"deadline":"2026-09-08T09:00:00+08:00"' in assessment.model_dump_json()
 
 
+def test_assessment_accepts_quiz_type() -> None:
+    assessment = Assessment.model_validate(
+        assessment_data(
+            type="quiz",
+            is_group=False,
+            group_size=None,
+        )
+    )
+
+    assert assessment.type is AssessmentType.QUIZ
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

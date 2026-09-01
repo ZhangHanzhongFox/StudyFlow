@@ -3,7 +3,7 @@
     "id": "task-presentation-requirements",
     "assessment_id": "assessment-presentation-ai-ethics",
     "name": "Extract presentation requirements and assign roles",
-    "duration_minutes": 90,
+    "duration_minutes": 30,
     "dependencies": [],
     "priority": 3,
     "status": "completed"
@@ -12,7 +12,7 @@
     "id": "task-presentation-outline",
     "assessment_id": "assessment-presentation-ai-ethics",
     "name": "Create the presentation storyline and outline",
-    "duration_minutes": 60,
+    "duration_minutes": 30,
     "dependencies": ["task-presentation-requirements"],
     "priority": 3,
     "status": "scheduled"
@@ -21,7 +21,7 @@
     "id": "task-presentation-slides",
     "assessment_id": "assessment-presentation-ai-ethics",
     "name": "Build and review the presentation slides",
-    "duration_minutes": 180,
+    "duration_minutes": 60,
     "dependencies": ["task-presentation-outline"],
     "priority": 4,
     "status": "scheduled"
@@ -48,7 +48,7 @@
     "id": "task-midterm-scope",
     "assessment_id": "assessment-midterm-algorithms",
     "name": "Review the midterm scope and learning outcomes",
-    "duration_minutes": 60,
+    "duration_minutes": 30,
     "dependencies": [],
     "priority": 4,
     "status": "scheduled"
@@ -65,27 +65,18 @@
   {
     "id": "task-midterm-practice",
     "assessment_id": "assessment-midterm-algorithms",
-    "name": "Solve timed practice problems",
+    "name": "Complete practice problems and a mock exam",
     "duration_minutes": 180,
     "dependencies": ["task-midterm-notes"],
     "priority": 5,
     "status": "scheduled"
   },
   {
-    "id": "task-midterm-mock",
-    "assessment_id": "assessment-midterm-algorithms",
-    "name": "Complete a mock midterm",
-    "duration_minutes": 120,
-    "dependencies": ["task-midterm-practice"],
-    "priority": 5,
-    "status": "scheduled"
-  },
-  {
     "id": "task-midterm-review",
     "assessment_id": "assessment-midterm-algorithms",
-    "name": "Review mock-exam mistakes and weak topics",
-    "duration_minutes": 90,
-    "dependencies": ["task-midterm-mock"],
+    "name": "Complete a final review of weak topics",
+    "duration_minutes": 60,
+    "dependencies": ["task-midterm-practice"],
     "priority": 5,
     "status": "scheduled"
   },
@@ -93,7 +84,7 @@
     "id": "task-coding-read-spec",
     "assessment_id": "assessment-coding-studyflow",
     "name": "Read the assignment specification and acceptance criteria",
-    "duration_minutes": 45,
+    "duration_minutes": 15,
     "dependencies": [],
     "priority": 2,
     "status": "scheduled"
@@ -102,7 +93,7 @@
     "id": "task-coding-design",
     "assessment_id": "assessment-coding-studyflow",
     "name": "Design the scheduling algorithm and interfaces",
-    "duration_minutes": 90,
+    "duration_minutes": 30,
     "dependencies": ["task-coding-read-spec"],
     "priority": 3,
     "status": "scheduled"
@@ -111,7 +102,7 @@
     "id": "task-coding-implement",
     "assessment_id": "assessment-coding-studyflow",
     "name": "Implement the deterministic scheduler",
-    "duration_minutes": 240,
+    "duration_minutes": 120,
     "dependencies": ["task-coding-design"],
     "priority": 3,
     "status": "scheduled"
@@ -120,7 +111,7 @@
     "id": "task-coding-tests",
     "assessment_id": "assessment-coding-studyflow",
     "name": "Write automated scheduling and conflict tests",
-    "duration_minutes": 120,
+    "duration_minutes": 60,
     "dependencies": ["task-coding-implement"],
     "priority": 3,
     "status": "scheduled"
@@ -129,7 +120,7 @@
     "id": "task-coding-refine",
     "assessment_id": "assessment-coding-studyflow",
     "name": "Debug edge cases and write the design note",
-    "duration_minutes": 150,
+    "duration_minutes": 60,
     "dependencies": ["task-coding-tests"],
     "priority": 4,
     "status": "scheduled"
