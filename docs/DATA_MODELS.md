@@ -30,12 +30,19 @@ Normalized academic assessment received from Canvas or mock input.
 
 `Assessment` does not contain `lock_at`, scheduled start/end times, or `source`.
 
-Initial `AssessmentType` values:
+Supported `AssessmentType` values:
 
 - `presentation`
 - `exam`
 - `midterm`
 - `coding_assignment`
+- `quiz`
+
+For an exam or midterm, preparatory work is represented as `Task` records, but
+the formal exam itself remains the `Assessment` at its deadline. It is not a
+zero-duration or nullable-duration task. When an integration provides an exact
+exam start and end time, that immovable event may also be represented as a
+`hard` `CalendarBlock`.
 
 Recommended validation:
 

@@ -32,6 +32,55 @@ Run tests:
 python -m pytest -q
 ```
 
+## Agent workflow without an API key
+
+The Agent / Workflow implementation works deterministically without network
+access or provider credentials. With no LLM supplied, it classifies from the
+already-normalized assessment type and decomposes presentation, exam/midterm,
+coding-assignment, and quiz assessments using validated fallback templates:
+
+```python
+from backend.agents import StudyFlowAgent
+from backend.services import MockDataStore
+
+store = MockDataStore()
+agent = StudyFlowAgent()
+tasks = agent.decompose_assessment(store.list_assessments()[0])
+```
+
+Use `FakeStructuredLLM` to exercise the same Pydantic structured-output path
+during development without a real model:
+
+```python
+from backend.agents import FakeStructuredLLM, StudyFlowAgent
+from backend.services import MockDataStore
+
+fake_llm = FakeStructuredLLM([
+    {"assessment_type": "presentation"},
+    {
+        "tasks": [
+            {
+                "step_key": "outline",
+                "name": "Create the presentation outline",
+                "duration_minutes": 60,
+                "priority": 3,
+                "dependency_keys": [],
+            }
+        ]
+    },
+])
+store = MockDataStore()
+agent = StudyFlowAgent(fake_llm)
+assessment_type = agent.classify_assessment(store.list_assessments()[0])
+tasks = agent.decompose_assessment(store.list_assessments()[0])
+```
+
+Mapping responses are validated with Pydantic before they enter business
+logic. Provider exceptions, invalid fields, unknown dependencies, and cyclic
+graphs cause the entire assessment to use its deterministic fallback. A future
+OpenAI adapter only needs to implement `StructuredLLM`; do not commit real API
+keys to the repository.
+
 ## Project references
 
 - [Architecture](docs/ARCHITECTURE.md)

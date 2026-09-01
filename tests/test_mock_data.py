@@ -57,7 +57,7 @@ def test_all_mock_records_validate_against_canonical_schemas() -> None:
     assessments, tasks, blocks, scheduled_tasks, events = load_scenario()
 
     assert len(assessments) == 3
-    assert len(tasks) == 16
+    assert len(tasks) == 15
     assert len(blocks) == 8
     assert len(scheduled_tasks) == len(tasks)
     assert len(events) == 5

@@ -51,9 +51,9 @@ def test_health_reports_mock_mode(app: FastAPI) -> None:
     "path,expected_count",
     [
         ("/assessments", 3),
-        ("/tasks", 16),
+        ("/tasks", 15),
         ("/calendar-blocks", 8),
-        ("/schedule", 16),
+        ("/schedule", 15),
         ("/planning-events", 5),
     ],
 )
@@ -75,7 +75,7 @@ def test_plan_returns_explicit_fixture_backed_scheduling_result(
 
     assert response.status_code == 200
     payload = response.json()
-    assert len(payload["scheduled_tasks"]) == 16
+    assert len(payload["scheduled_tasks"]) == 15
     assert payload["unscheduled_tasks"] == []
 
 

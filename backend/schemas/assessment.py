@@ -15,6 +15,7 @@ class AssessmentType(str, Enum):
     EXAM = "exam"
     MIDTERM = "midterm"
     CODING_ASSIGNMENT = "coding_assignment"
+    QUIZ = "quiz"
 
 
 class Assessment(StudyFlowBaseModel):
