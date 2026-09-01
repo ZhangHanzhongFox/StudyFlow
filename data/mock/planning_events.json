@@ -1,0 +1,32 @@
+[
+  {
+    "id": "event-coding-assessment-added",
+    "event_type": "new_assessment",
+    "timestamp": "2026-09-01T08:00:00+08:00",
+    "reference_id": "assessment-coding-studyflow"
+  },
+  {
+    "id": "event-midterm-assessment-updated",
+    "event_type": "assessment_updated",
+    "timestamp": "2026-09-01T09:00:00+08:00",
+    "reference_id": "assessment-midterm-algorithms"
+  },
+  {
+    "id": "event-presentation-requirements-completed",
+    "event_type": "task_completed",
+    "timestamp": "2026-09-02T10:30:00+08:00",
+    "reference_id": "task-presentation-requirements"
+  },
+  {
+    "id": "event-team-meeting-calendar-changed",
+    "event_type": "calendar_changed",
+    "timestamp": "2026-09-03T20:00:00+08:00",
+    "reference_id": "calendar-team-meeting-0904"
+  },
+  {
+    "id": "event-presentation-slides-missed",
+    "event_type": "task_missed",
+    "timestamp": "2026-09-04T12:05:00+08:00",
+    "reference_id": "task-presentation-slides"
+  }
+]
