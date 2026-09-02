@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 
+from backend.agents import StudyFlowAgent
 from backend.scheduler import SchedulingResult
 from backend.schemas import (
     Assessment,
@@ -10,6 +11,7 @@ from backend.schemas import (
     PlanningEvent,
     ScheduledTask,
     Task,
+    validate_task_graph,
 )
 from backend.services import MockDataStore, PlanningPipeline
 
@@ -86,6 +88,45 @@ def test_plan_decomposes_all_assessments_then_calls_scheduler() -> None:
     ]
     assert result.scheduled_tasks == store.list_scheduled_tasks()
     assert result.unscheduled_tasks == []
+
+
+def test_studyflow_agent_is_directly_injectable_for_all_workflow_types() -> None:
+    store = MockDataStore()
+    midterm = next(
+        assessment
+        for assessment in store.list_assessments()
+        if assessment.type is AssessmentType.MIDTERM
+    )
+    quiz = midterm.model_copy(
+        update={
+            "id": "assessment-quiz-pipeline-test",
+            "title": "Week 3 Review Quiz",
+            "description": "",
+            "type": AssessmentType.QUIZ,
+        }
+    )
+    assessments = [*store.list_assessments(), quiz]
+    scheduler = RecordingScheduler([])
+    pipeline = PlanningPipeline(StudyFlowAgent(), scheduler)
+
+    result = pipeline.plan(assessments, store.list_calendar_blocks())
+
+    tasks = scheduler.scheduled_tasks_received
+    assert result == SchedulingResult()
+    assert validate_task_graph(tasks) == tasks
+    assert {task.assessment_id for task in tasks} == {
+        assessment.id for assessment in assessments
+    }
+    assert all(task.duration_minutes > 0 for task in tasks)
+    assert all(1 <= task.priority <= 5 for task in tasks)
+
+    quiz_tasks = [task for task in tasks if task.assessment_id == quiz.id]
+    assert [task.name for task in quiz_tasks] == [
+        "Review the relevant course material",
+        "Take the quiz",
+    ]
+    assert quiz_tasks[0].dependencies == []
+    assert quiz_tasks[1].dependencies == [quiz_tasks[0].id]
 
 
 def test_replan_separates_affected_task_discovery_from_time_placement() -> None:

@@ -66,6 +66,10 @@ agent = StudyFlowAgent()
 tasks = agent.decompose_assessment(store.list_assessments()[0])
 ```
 
+If a provider supplies no assessment description, the normalized empty string
+is preserved and the agent still uses the assessment type's deterministic
+template. It does not infer missing requirements from unavailable text.
+
 Use `FakeStructuredLLM` to exercise the same Pydantic structured-output path
 during development without a real model:
 
@@ -98,6 +102,10 @@ logic. Provider exceptions, invalid fields, unknown dependencies, and cyclic
 graphs cause the entire assessment to use its deterministic fallback. A future
 OpenAI adapter only needs to implement `StructuredLLM`; do not commit real API
 keys to the repository.
+
+For a `task_missed` event, the agent marks the referenced task and every
+incomplete transitive dependent as affected. Completed, upstream, and unrelated
+tasks stay outside the replanning scope.
 
 ## Project references
 
