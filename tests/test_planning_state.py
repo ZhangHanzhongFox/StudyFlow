@@ -1,7 +1,10 @@
 """Atomic state and cross-reference validation tests."""
 
+from datetime import datetime, timezone
+
 import pytest
 
+from backend.schemas import PlanningEvent, PlanningEventType, TaskStatus
 from backend.services import (
     DuplicatePlanningEventError,
     MockDataStore,
@@ -64,6 +67,22 @@ def test_duplicate_event_is_rejected_before_mutation() -> None:
 
     with pytest.raises(DuplicatePlanningEventError, match="already exists"):
         state.add_planning_event(event)
+
+
+def test_task_progress_event_updates_task_status() -> None:
+    state = MockDataStore()
+    task = state.list_tasks()[0]
+    event = PlanningEvent(
+        id="event-state-completed",
+        event_type=PlanningEventType.TASK_COMPLETED,
+        timestamp=datetime(2026, 9, 2, 12, tzinfo=timezone.utc),
+        reference_id=task.id,
+    )
+
+    state.add_planning_event(event)
+
+    updated = next(item for item in state.list_tasks() if item.id == task.id)
+    assert updated.status is TaskStatus.COMPLETED
 
 
 def test_replan_schedule_and_event_commit_is_atomic() -> None:
