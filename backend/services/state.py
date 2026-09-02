@@ -10,6 +10,7 @@ from backend.schemas import (
     PlanningEventType,
     ScheduledTask,
     Task,
+    TaskStatus,
     validate_task_graph,
 )
 
@@ -157,10 +158,44 @@ class PlanningState:
         with self._lock:
             return self._copies(self._planning_events)
 
+    @staticmethod
+    def _apply_task_event(
+        tasks: Iterable[Task],
+        event: PlanningEvent,
+    ) -> list[Task]:
+        status_by_event = {
+            PlanningEventType.TASK_COMPLETED: TaskStatus.COMPLETED,
+            PlanningEventType.TASK_MISSED: TaskStatus.MISSED,
+        }
+        updated_status = status_by_event.get(event.event_type)
+        return [
+            task.model_copy(update={"status": updated_status})
+            if updated_status is not None and task.id == event.reference_id
+            else task.model_copy(deep=True)
+            for task in tasks
+        ]
+
+    @staticmethod
+    def _apply_schedule_status(
+        tasks: Iterable[Task],
+        scheduled_tasks: Iterable[ScheduledTask],
+    ) -> list[Task]:
+        scheduled_task_ids = {
+            placement.task_id for placement in scheduled_tasks
+        }
+        return [
+            task.model_copy(update={"status": TaskStatus.SCHEDULED})
+            if task.id in scheduled_task_ids
+            and task.status in {TaskStatus.PENDING, TaskStatus.MISSED}
+            else task.model_copy(deep=True)
+            for task in tasks
+        ]
+
     def add_planning_event(self, event: PlanningEvent) -> PlanningEvent:
         with self._lock:
             self.validate_planning_event(event)
             stored = event.model_copy(deep=True)
+            self._tasks = self._apply_task_event(self._tasks, stored)
             self._planning_events.append(stored)
             return stored.model_copy(deep=True)
 
@@ -189,6 +224,7 @@ class PlanningState:
         assessment_list = list(assessments)
         task_list = list(tasks)
         schedule_list = list(scheduled_tasks)
+        task_list = self._apply_schedule_status(task_list, schedule_list)
         with self._lock:
             validate_planning_state(
                 assessment_list,
@@ -224,14 +260,20 @@ class PlanningState:
                 raise DuplicatePlanningEventError(
                     f"planning event id already exists: {event.id}"
                 )
+            updated_tasks = self._apply_task_event(self._tasks, event)
+            updated_tasks = self._apply_schedule_status(
+                updated_tasks,
+                schedule_list,
+            )
             validate_planning_state(
                 self._assessments,
-                self._tasks,
+                updated_tasks,
                 self._calendar_blocks,
                 schedule_list,
                 [*self._planning_events, event],
             )
             stored = event.model_copy(deep=True)
+            self._tasks = self._copies(updated_tasks)
             self._scheduled_tasks = self._copies(schedule_list)
             self._planning_events.append(stored)
             return stored.model_copy(deep=True)

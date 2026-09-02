@@ -13,13 +13,13 @@ to `create_app()` by the deployment or test configuration.
 |---|---|---|---|
 | `GET` | `/health` | status object | Reports mock data mode |
 | `GET` | `/assessments` | `Assessment[]` | Validated shared fixtures |
-| `GET` | `/tasks` | `Task[]` | Validated shared fixtures |
+| `GET` | `/tasks` | `Task[]` | Latest generated planning state |
 | `GET` | `/calendar-blocks` | `CalendarBlock[]` | Validated shared fixtures |
-| `GET` | `/schedule` | `ScheduledTask[]` | Baseline fixture schedule |
-| `GET` | `/planning-events` | `PlanningEvent[]` | Fixture events plus in-memory posts |
+| `GET` | `/schedule` | `ScheduledTask[]` | Latest generated planning state |
+| `GET` | `/planning-events` | `PlanningEvent[]` | Current in-memory observation history |
 | `POST` | `/planning-events` | `PlanningEvent` | Validates and stores an event in memory |
-| `POST` | `/plan` | `SchedulingResult` | Fixture fallback, or injected pipeline result |
-| `POST` | `/replan` | `SchedulingResult` | HTTP 501 until a pipeline is injected |
+| `POST` | `/plan` | `SchedulingResult` | Runs the default or injected Agent → Scheduler pipeline |
+| `POST` | `/replan` | `SchedulingResult` | Runs affected-task discovery and dependency-injected rescheduling |
 
 FastAPI also provides generated OpenAPI documentation at `/docs` while the
 application is running.
@@ -89,18 +89,23 @@ Invalid schema input returns FastAPI's standard HTTP 422 validation response.
 An event with a valid shape but an unknown `reference_id` also returns HTTP 422
 with `detail.code = unknown_reference`.
 
-## Replan placeholder
+## Runtime modes
 
-`POST /replan` already accepts a canonical `PlanningEvent`, which is the future
-trigger passed to `PlanningPipeline.replan()`. Until the Agent and Scheduler are
-connected it returns HTTP 501 with `detail.code = replanning_not_implemented`.
-This prevents clients from mistaking an unchanged baseline for a successful
-adaptive replan.
+`backend.main:app` is the provider-backed dynamic demo runtime. It normalizes
+provider-shaped mocks into canonical assessments and calendar blocks, starts
+with no precomputed tasks or schedule, and runs the real Agent and Scheduler
+after `POST /plan`.
 
-When `create_app(..., pipeline=planning_pipeline)` is configured, `/plan`
-stores the pipeline's classified assessments, generated tasks, and schedule in
-the in-memory planning state. `/replan` pre-validates the event, invokes the
-pipeline, atomically replaces the schedule, and then appends the event.
+Passing an explicit store without a pipeline, such as
+`create_app(MockDataStore())`, preserves the baseline fixture behavior for
+contract tests and isolated frontend work. In that explicit fallback mode,
+`POST /replan` returns HTTP 501 with
+`detail.code = replanning_not_implemented`.
+
+In dynamic mode, `/plan` stores the pipeline's classified assessments,
+generated tasks, and schedule in the in-memory planning state. `/replan`
+pre-validates the event, invokes the pipeline, atomically replaces the
+schedule, and then appends the event.
 
 If an injected Agent or Scheduler returns references that cannot form a valid
 planning state, the API rejects the result with HTTP 500:
@@ -113,3 +118,9 @@ planning state, the API rejects the result with HTTP 500:
   }
 }
 ```
+
+Pipeline input failures return HTTP 422 with
+`detail.code = invalid_planning_input` or `invalid_replanning_input`.
+Unexpected runtime failures return HTTP 500 with `detail.code = planning_failed`
+or `replanning_failed`. Failed runs do not partially replace tasks, schedules,
+or planning events. Duplicate event IDs continue to return HTTP 409.

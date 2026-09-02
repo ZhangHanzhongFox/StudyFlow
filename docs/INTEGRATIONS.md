@@ -27,6 +27,22 @@ from backend.services import MockDataStore
 store = MockDataStore.from_provider_fixtures()
 ```
 
+For an end-to-end dynamic plan, omit the precomputed task, schedule, and event
+fixtures while retaining provider-normalized assessments and calendar blocks:
+
+```python
+from backend.services import MockDataStore
+
+store = MockDataStore.for_dynamic_provider_demo()
+```
+
+This is the store used by the exported `backend.main:app`. The default
+`PlanningPipeline` injects `StudyFlowAgent` and `StudySchedulerAdapter`; the
+adapter implements the stable Scheduler protocol around B's concrete
+`StudyScheduler`, supplies a reproducible mock planning clock, reports deadline
+and dependency failures through `UnscheduledTask`, and preserves unaffected
+placements during replanning.
+
 ## Canvas normalization
 
 Canvas assignment payloads are normalized by
@@ -74,6 +90,8 @@ defines their blocking semantics.
 calendar blocks, schedule, and planning events. It validates cross-collection
 references before atomically replacing a plan or schedule. List operations
 return defensive copies so API consumers cannot mutate state accidentally.
+Successful placements update pending tasks to `scheduled`; task progress events
+update the referenced task state in the same in-memory transaction.
 
 This state is intentionally process-local for the hackathon. It can later be
 replaced with persistent storage without changing the canonical schemas or the

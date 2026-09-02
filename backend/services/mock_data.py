@@ -32,6 +32,7 @@ class MockDataStore(PlanningState):
         data_dir: Path = DEFAULT_MOCK_DATA_DIR,
         canvas_payload_path: Path | None = None,
         calendar_payload_path: Path | None = None,
+        include_baseline_plan: bool = True,
     ) -> None:
         self.data_dir = data_dir
         assessments = (
@@ -46,10 +47,20 @@ class MockDataStore(PlanningState):
         )
         super().__init__(
             assessments=assessments,
-            tasks=self._load("tasks.json", Task),
+            tasks=(
+                self._load("tasks.json", Task) if include_baseline_plan else []
+            ),
             calendar_blocks=calendar_blocks,
-            scheduled_tasks=self._load("scheduled_tasks.json", ScheduledTask),
-            planning_events=self._load("planning_events.json", PlanningEvent),
+            scheduled_tasks=(
+                self._load("scheduled_tasks.json", ScheduledTask)
+                if include_baseline_plan
+                else []
+            ),
+            planning_events=(
+                self._load("planning_events.json", PlanningEvent)
+                if include_baseline_plan
+                else []
+            ),
         )
 
     @classmethod
@@ -66,6 +77,23 @@ class MockDataStore(PlanningState):
             / "mock_canvas_assignments.json",
             calendar_payload_path=provider_data_dir
             / "mock_google_calendar_events.json",
+        )
+
+    @classmethod
+    def for_dynamic_provider_demo(
+        cls,
+        data_dir: Path = DEFAULT_MOCK_DATA_DIR,
+        provider_data_dir: Path = DEFAULT_PROVIDER_DATA_DIR,
+    ) -> "MockDataStore":
+        """Load provider inputs without seeding precomputed plan outputs."""
+
+        return cls(
+            data_dir=data_dir,
+            canvas_payload_path=provider_data_dir
+            / "mock_canvas_assignments.json",
+            calendar_payload_path=provider_data_dir
+            / "mock_google_calendar_events.json",
+            include_baseline_plan=False,
         )
 
     def _load(self, filename: str, model: type[ModelT]) -> list[ModelT]:

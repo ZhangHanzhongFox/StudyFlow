@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.agents import StudyFlowAgent
 from backend.scheduler import SchedulingResult
 from backend.schemas import (
     Assessment,
@@ -19,6 +20,7 @@ from backend.services import (
     PlanningPipeline,
     PlanningState,
     PlanningStateValidationError,
+    StudySchedulerAdapter,
     UnknownPlanningEventReferenceError,
 )
 
@@ -35,7 +37,13 @@ def create_app(
 ) -> FastAPI:
     """Create an API app with an injectable data store for tests and adapters."""
 
-    selected_store = store or MockDataStore()
+    use_default_runtime = store is None and pipeline is None
+    selected_store = store or MockDataStore.for_dynamic_provider_demo()
+    selected_pipeline = (
+        PlanningPipeline(StudyFlowAgent(), StudySchedulerAdapter())
+        if use_default_runtime
+        else pipeline
+    )
     app = FastAPI(
         title="StudyFlow API",
         version="0.1.0",
@@ -96,13 +104,13 @@ def create_app(
     def create_plan() -> SchedulingResult:
         """Run an injected pipeline or preserve the demo-safe fallback."""
 
-        if pipeline is not None:
-            planning_run = pipeline.run_plan(
-                selected_store.list_assessments(),
-                selected_store.list_calendar_blocks(),
-                selected_store.list_scheduled_tasks(),
-            )
+        if selected_pipeline is not None:
             try:
+                planning_run = selected_pipeline.run_plan(
+                    selected_store.list_assessments(),
+                    selected_store.list_calendar_blocks(),
+                    selected_store.list_scheduled_tasks(),
+                )
                 selected_store.replace_plan(
                     planning_run.assessments,
                     planning_run.tasks,
@@ -116,6 +124,22 @@ def create_app(
                         "message": str(error),
                     },
                 ) from error
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "invalid_planning_input",
+                        "message": str(error),
+                    },
+                ) from error
+            except Exception as error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": "planning_failed",
+                        "message": "The planning pipeline could not complete.",
+                    },
+                ) from error
             return planning_run.result
 
         return SchedulingResult(
@@ -127,7 +151,7 @@ def create_app(
     def replan(event: PlanningEvent) -> SchedulingResult:
         """Run an injected replan pipeline or keep the explicit placeholder."""
 
-        if pipeline is None:
+        if selected_pipeline is None:
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
                 detail={
@@ -142,7 +166,7 @@ def create_app(
 
         try:
             selected_store.validate_planning_event(event)
-            result = pipeline.replan(
+            result = selected_pipeline.replan(
                 event,
                 selected_store.list_assessments(),
                 selected_store.list_tasks(),
@@ -170,6 +194,22 @@ def create_app(
                 detail={
                     "code": "invalid_planning_state",
                     "message": str(error),
+                },
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_replanning_input",
+                    "message": str(error),
+                },
+            ) from error
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "replanning_failed",
+                    "message": "The replanning pipeline could not complete.",
                 },
             ) from error
 
