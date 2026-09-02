@@ -32,6 +32,24 @@ Run tests:
 python -m pytest -q
 ```
 
+## Data integration and backend state
+
+Realistic Canvas and Google Calendar-shaped mocks live under `data/providers/`
+and normalize into the five canonical Pydantic contracts before entering
+business logic. To exercise the same boundary without OAuth credentials:
+
+```python
+from backend.services import MockDataStore
+
+store = MockDataStore.from_provider_fixtures()
+```
+
+The API uses validated, process-local planning state. Its default `/plan`
+fixture fallback remains available for frontend development. When A and B are
+both supplied through an injected `PlanningPipeline`, `/plan` and `/replan`
+atomically update the current tasks, schedule, and events. See
+[`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
 ## Agent workflow without an API key
 
 The Agent / Workflow implementation works deterministically without network
@@ -86,4 +104,5 @@ keys to the repository.
 - [Architecture](docs/ARCHITECTURE.md)
 - [API contract](docs/API_CONTRACT.md)
 - [Canonical data models](docs/DATA_MODELS.md)
+- [Provider integrations](docs/INTEGRATIONS.md)
 - [Shared mock data](data/README.md)

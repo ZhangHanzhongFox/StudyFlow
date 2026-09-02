@@ -33,3 +33,11 @@ IDs are stable cross-file references. Keep them unchanged unless every consumer
 and fixture reference is updated together. Provider-specific mock payloads may
 be added separately under `data/providers/`, but must be normalized into these
 contracts before entering business logic.
+
+## Provider-shaped fixtures
+
+`data/providers/` contains realistic Canvas and Google Calendar-style payloads,
+not canonical models. The C workstream adapters normalize them to the exact
+assessment and calendar records above. They deliberately preserve the shared
+stable IDs so provider-boundary testing does not disrupt Agent, Scheduler, or
+Frontend development. See `docs/INTEGRATIONS.md` for the mapping rules.
