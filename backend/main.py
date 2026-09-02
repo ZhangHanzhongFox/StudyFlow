@@ -1,12 +1,11 @@
-"""StudyFlow's mock-backed FastAPI planning application."""
+"""StudyFlow's fixture-backed FastAPI application skeleton."""
 
 from collections.abc import Sequence
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.agents import StudyFlowAgent
-from backend.scheduler import SchedulingResult, StudyScheduler
+from backend.scheduler import SchedulingResult
 from backend.schemas import (
     Assessment,
     CalendarBlock,
@@ -177,19 +176,4 @@ def create_app(
     return app
 
 
-def create_demo_app() -> FastAPI:
-    """Build the runnable mock app with the real Agent and Scheduler pipeline."""
-
-    fixture_store = MockDataStore.from_provider_fixtures()
-    planning_store = PlanningState(
-        assessments=fixture_store.list_assessments(),
-        calendar_blocks=fixture_store.list_calendar_blocks(),
-    )
-    pipeline = PlanningPipeline(
-        agent=StudyFlowAgent(),
-        scheduler=StudyScheduler(),
-    )
-    return create_app(planning_store, pipeline)
-
-
-app = create_demo_app()
+app = create_app()

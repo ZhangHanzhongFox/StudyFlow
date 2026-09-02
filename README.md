@@ -18,7 +18,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Run the mock-backed API with the real Agent → Scheduler pipeline:
+Run the fixture-backed API:
 
 ```bash
 uvicorn backend.main:app --reload
@@ -44,12 +44,11 @@ from backend.services import MockDataStore
 store = MockDataStore.from_provider_fixtures()
 ```
 
-The API uses validated, process-local planning state. The default
-`backend.main:app` starts with normalized mock assessments and calendar blocks;
-`POST /plan` classifies and decomposes those assessments, schedules the tasks,
-and atomically stores the generated plan. `create_app()` still accepts an
-explicit store or pipeline so tests and alternate adapters can control the
-runtime composition. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+The API uses validated, process-local planning state. Its default `/plan`
+fixture fallback remains available for frontend development. When A and B are
+both supplied through an injected `PlanningPipeline`, `/plan` and `/replan`
+atomically update the current tasks, schedule, and events. See
+[`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ## Deterministic scheduling
 
@@ -62,8 +61,7 @@ incomplete tasks within a configurable daily study window while respecting:
 - completed work and preserved placements.
 
 Tasks that cannot fit are returned in `unscheduled_tasks` with a stable reason
-instead of being silently dropped. The dashboard's **Generate Plan** action
-calls `POST /plan` and refreshes the generated tasks and schedule.
+instead of being silently dropped.
 
 ## Agent workflow without an API key
 

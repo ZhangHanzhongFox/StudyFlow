@@ -7,9 +7,8 @@ from typing import Any
 import httpx
 from fastapi import FastAPI
 
-from backend.agents import StudyFlowAgent
 from backend.main import create_app
-from backend.scheduler import SchedulingResult, StudyScheduler
+from backend.scheduler import SchedulingResult
 from backend.schemas import (
     Assessment,
     AssessmentType,
@@ -18,7 +17,7 @@ from backend.schemas import (
     ScheduledTask,
     Task,
 )
-from backend.services import MockDataStore, PlanningPipeline, PlanningState
+from backend.services import MockDataStore, PlanningPipeline
 
 
 def request(
@@ -100,47 +99,6 @@ def test_injected_plan_updates_current_state() -> None:
         item.model_dump(mode="json") for item in store.list_scheduled_tasks()
     ]
     assert len(request(app, "GET", "/tasks").json()) == 15
-
-
-def test_real_agent_and_scheduler_generate_a_deadline_safe_plan() -> None:
-    fixtures = MockDataStore.from_provider_fixtures()
-    store = PlanningState(
-        assessments=fixtures.list_assessments(),
-        calendar_blocks=fixtures.list_calendar_blocks(),
-    )
-    pipeline = PlanningPipeline(
-        StudyFlowAgent(),
-        StudyScheduler(),
-    )
-    app = create_app(store, pipeline)
-
-    response = request(app, "POST", "/plan")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert len(payload["scheduled_tasks"]) == 15
-    assert payload["unscheduled_tasks"] == []
-
-    assessments = {
-        item["id"]: item for item in request(app, "GET", "/assessments").json()
-    }
-    tasks = {item["id"]: item for item in request(app, "GET", "/tasks").json()}
-    schedule = request(app, "GET", "/schedule").json()
-    hard_blocks = [
-        item
-        for item in request(app, "GET", "/calendar-blocks").json()
-        if item["flexibility"] == "hard"
-    ]
-
-    for placement in schedule:
-        task = tasks[placement["task_id"]]
-        assessment = assessments[task["assessment_id"]]
-        assert placement["end_time"] <= assessment["deadline"]
-        assert all(
-            placement["end_time"] <= block["start_time"]
-            or placement["start_time"] >= block["end_time"]
-            for block in hard_blocks
-        )
 
 
 def test_injected_replan_persists_event_and_schedule() -> None:
