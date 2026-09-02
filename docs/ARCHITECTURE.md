@@ -78,6 +78,18 @@ B must return an `UnscheduledTask` with a machine-readable reason when a task
 cannot be placed. It must not silently drop work. A may then decide whether to
 decompose differently, adjust estimates, or ask the user for a decision.
 
+Observation writes now use `PlanningState.replan`: under one state lock, C
+stages task status and an optional calendar upsert, runs A/B, validates the
+result, then commits tasks, calendar, schedule and event together. No state is
+published on exceptions. `/replan` takes a bare event; `/calendar-changes`
+takes the `CalendarChangeRequest` wrapper, without changing domain fields.
+
+The pipeline passes `event.timestamp` as `replanning_start` to the Scheduler.
+For calendar events it also sets `preserve_valid_affected=True`; A's broad
+candidate set does not force all valid tasks to move. B checks actual time
+constraints and propagates necessary dependency moves. See
+[REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for the implemented shared baseline.
+
 ## Stable Python interfaces
 
 - `AgentWorkflow` in `backend/agents/contracts.py`

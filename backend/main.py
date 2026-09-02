@@ -10,6 +10,7 @@ from backend.scheduler import SchedulingResult, StudyScheduler
 from backend.schemas import (
     Assessment,
     CalendarBlock,
+    CalendarChangeRequest,
     PlanningEvent,
     ScheduledTask,
     Task,
@@ -98,6 +99,11 @@ def create_app(
                 status_code=422,
                 detail={"code": "unknown_reference", "message": str(error)},
             ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_planning_event", "message": str(error)},
+            ) from error
 
     @app.post("/plan", response_model=SchedulingResult)
     def create_plan() -> SchedulingResult:
@@ -148,7 +154,20 @@ def create_app(
 
     @app.post("/replan", response_model=SchedulingResult)
     def replan(event: PlanningEvent) -> SchedulingResult:
-        """Run an injected replan pipeline or keep the explicit placeholder."""
+        """Observe and replan once; do not pre-post this event elsewhere."""
+
+        return run_replan(event)
+
+    @app.post("/calendar-changes", response_model=SchedulingResult)
+    def change_calendar(change: CalendarChangeRequest) -> SchedulingResult:
+        """Upsert one block and replan atomically, including new block IDs."""
+
+        return run_replan(change.event, change.calendar_block)
+
+    def run_replan(
+        event: PlanningEvent,
+        calendar_block: CalendarBlock | None = None,
+    ) -> SchedulingResult:
 
         if selected_pipeline is None:
             raise HTTPException(
@@ -164,19 +183,9 @@ def create_app(
             )
 
         try:
-            selected_store.validate_planning_event(event)
-            result = selected_pipeline.replan(
-                event,
-                selected_store.list_assessments(),
-                selected_store.list_tasks(),
-                selected_store.list_calendar_blocks(),
-                selected_store.list_scheduled_tasks(),
+            return selected_store.replan(
+                event, selected_pipeline, calendar_block,
             )
-            selected_store.replace_schedule_and_add_event(
-                result.scheduled_tasks,
-                event,
-            )
-            return result
         except DuplicatePlanningEventError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

@@ -129,6 +129,7 @@ tasks stay outside the replanning scope.
 
 ## Project references
 
+- [September 3 Replan handoff and acceptance scenarios](docs/REPLAN_HANDOFF.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [API contract](docs/API_CONTRACT.md)
 - [Canonical data models](docs/DATA_MODELS.md)

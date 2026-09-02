@@ -44,11 +44,13 @@ from .calendar import CalendarBlock, Flexibility
 from .event import PlanningEvent, PlanningEventType
 from .schedule import ScheduledTask
 from .task import Task, TaskStatus, validate_task_graph
+from .requests import CalendarChangeRequest
 
 __all__ = [
     "Assessment",
     "AssessmentType",
     "CalendarBlock",
+    "CalendarChangeRequest",
     "Flexibility",
     "PlanningEvent",
     "PlanningEventType",

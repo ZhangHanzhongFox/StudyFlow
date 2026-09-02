@@ -26,6 +26,19 @@ export interface ScheduledTask {
   flexibility: "hard" | "soft" | "flexible";
 }
 
+export interface CalendarBlock {
+  id: string;
+  title: string;
+  start_time: string;
+  end_time: string;
+  flexibility: "hard" | "soft" | "flexible";
+}
+
+export interface CalendarChangeRequest {
+  event: PlanningEvent & { event_type: "calendar_changed" };
+  calendar_block: CalendarBlock;
+}
+
 export type TaskStatus =
   | "pending"
   | "scheduled"

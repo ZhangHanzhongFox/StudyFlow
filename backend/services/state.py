@@ -2,6 +2,11 @@
 
 from collections.abc import Iterable
 from threading import RLock
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.scheduler import SchedulingResult
+    from .planning import PlanningPipeline
 
 from backend.schemas import (
     Assessment,
@@ -167,7 +172,13 @@ class PlanningState:
             PlanningEventType.TASK_COMPLETED: TaskStatus.COMPLETED,
             PlanningEventType.TASK_MISSED: TaskStatus.MISSED,
         }
+        tasks = list(tasks)
         updated_status = status_by_event.get(event.event_type)
+        if updated_status is TaskStatus.MISSED and any(
+            task.id == event.reference_id and task.status is TaskStatus.COMPLETED
+            for task in tasks
+        ):
+            raise ValueError("a completed task cannot be marked missed")
         return [
             task.model_copy(update={"status": updated_status})
             if updated_status is not None and task.id == event.reference_id
@@ -187,6 +198,8 @@ class PlanningState:
             task.model_copy(update={"status": TaskStatus.SCHEDULED})
             if task.id in scheduled_task_ids
             and task.status in {TaskStatus.PENDING, TaskStatus.MISSED}
+            else task.model_copy(update={"status": TaskStatus.PENDING})
+            if task.id not in scheduled_task_ids and task.status is TaskStatus.SCHEDULED
             else task.model_copy(deep=True)
             for task in tasks
         ]
@@ -198,6 +211,58 @@ class PlanningState:
             self._tasks = self._apply_task_event(self._tasks, stored)
             self._planning_events.append(stored)
             return stored.model_copy(deep=True)
+
+    def replan(
+        self,
+        event: PlanningEvent,
+        pipeline: "PlanningPipeline",
+        calendar_block: CalendarBlock | None = None,
+    ) -> "SchedulingResult":
+        """Stage an observation, run planning, and commit all state together.
+
+        Serialize read/compute/commit so simultaneous observations cannot plan
+        against an obsolete snapshot. Exceptions leave the live state intact;
+        explicit unscheduled tasks are normal results and are committed.
+        """
+
+        with self._lock:
+            if any(item.id == event.id for item in self._planning_events):
+                raise DuplicatePlanningEventError(
+                    f"planning event id already exists: {event.id}"
+                )
+            blocks = self.list_calendar_blocks()
+            if calendar_block is not None:
+                if (event.event_type is not PlanningEventType.CALENDAR_CHANGED
+                        or event.reference_id != calendar_block.id):
+                    raise ValueError("calendar change event must reference its block")
+                blocks = [item for item in blocks if item.id != calendar_block.id]
+                blocks.append(calendar_block.model_copy(deep=True))
+            validate_planning_state(
+                self._assessments, self._tasks, blocks,
+                self._scheduled_tasks, [*self._planning_events, event],
+            )
+            tasks = self._apply_task_event(self._tasks, event)
+            result = pipeline.replan(
+                event.model_copy(deep=True), self.list_assessments(), tasks,
+                blocks, self.list_scheduled_tasks(),
+            )
+            tasks = self._apply_schedule_status(tasks, result.scheduled_tasks)
+            validate_planning_state(
+                self._assessments, tasks, blocks,
+                result.scheduled_tasks, [*self._planning_events, event],
+            )
+            task_ids = {task.id for task in tasks}
+            scheduled_ids = {item.task_id for item in result.scheduled_tasks}
+            failure_ids = [item.task_id for item in result.unscheduled_tasks]
+            if (not set(failure_ids) <= task_ids
+                    or set(failure_ids) & scheduled_ids
+                    or len(failure_ids) != len(set(failure_ids))):
+                raise PlanningStateValidationError("invalid unscheduled task references")
+            self._tasks = self._copies(tasks)
+            self._calendar_blocks = self._copies(blocks)
+            self._scheduled_tasks = self._copies(result.scheduled_tasks)
+            self._planning_events.append(event.model_copy(deep=True))
+            return result
 
     def validate_planning_event(self, event: PlanningEvent) -> None:
         """Check an event without mutating state, for transactional workflows."""

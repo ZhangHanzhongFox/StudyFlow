@@ -143,6 +143,9 @@ class EmptyScheduler:
         calendar_blocks: Sequence[CalendarBlock],
         existing_schedule: Sequence[ScheduledTask],
         affected_task_ids: set[str],
+        *,
+        replanning_start: datetime | None = None,
+        preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
         return SchedulingResult()
 
