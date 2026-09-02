@@ -101,10 +101,12 @@ using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
-The FastAPI app currently exposes the validated shared mock data. `POST /plan`
-returns the baseline mock schedule so the frontend can integrate immediately.
-`POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
-both injected through `PlanningPipeline`.
+The default FastAPI app starts with validated mock assessments and calendar
+blocks, then injects `StudyFlowAgent` and `StudyScheduler` through
+`PlanningPipeline`. `POST /plan` now generates and stores a real plan rather
+than returning the baseline fixture. The scheduler respects assessment unlock
+times and deadlines, dependency order, duration, priority, and hard calendar
+blocks; work that cannot fit is returned explicitly as `UnscheduledTask`.
 
 Canvas and Google Calendar-shaped mocks are normalized at
 `backend/integrations/` and can populate the same canonical demo state without
@@ -112,7 +114,8 @@ changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
 schedule entries, and events in process memory with atomic reference
 validation. No endpoint writes to fixture files.
 
-`create_app()` accepts an optional `PlanningPipeline`. Without it, the stable
-fixture `/plan` and explicit `/replan` 501 behavior remain unchanged. With it,
-the API stores validated planning artifacts and replan results atomically. This
-keeps D unblocked while A and B implementations are integrated independently.
+`create_app()` accepts an optional `PlanningPipeline`. Without one it retains
+the explicit fixture fallback and `/replan` 501 behavior for isolated API
+tests. `create_demo_app()` composes the runnable mock application with the real
+Agent and Scheduler implementations, and stores planning and replan results
+atomically.
