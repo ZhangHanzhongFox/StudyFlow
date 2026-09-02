@@ -101,6 +101,11 @@ using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
+`StudyScheduler` implements the stable `Scheduler` protocol and is injected by
+C through `PlanningPipeline`. It respects assessment unlock times and
+deadlines, dependency order, duration, priority, and hard calendar blocks;
+work that cannot fit is returned explicitly as `UnscheduledTask`.
+
 The exported FastAPI app normalizes provider-shaped mock data and injects the
 real `StudyFlowAgent` and `StudyScheduler` through `PlanningPipeline`.
 `POST /plan` generates canonical tasks and a dynamic schedule, then atomically
@@ -113,9 +118,6 @@ changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
 schedule entries, and events in process memory with atomic reference
 validation. No endpoint writes to fixture files.
 
-`StudySchedulerAdapter` is the C-owned integration layer around B's concrete
-scheduler. It preserves the shared Scheduler protocol and response shape while
-mapping deadline failures and preserving unaffected placements on replan.
-`create_app()` still accepts an explicit store and optional pipeline for tests;
-passing a store without a pipeline retains the stable fixture `/plan` and
-explicit `/replan` 501 behavior.
+`create_app()` still accepts an explicit store and optional pipeline for tests.
+Passing a store without a pipeline retains the stable fixture `/plan` and
+explicit `/replan` 501 behavior, without changing the public API shape.

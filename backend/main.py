@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.agents import StudyFlowAgent
-from backend.scheduler import SchedulingResult
+from backend.scheduler import SchedulingResult, StudyScheduler
 from backend.schemas import (
     Assessment,
     CalendarBlock,
@@ -20,7 +20,6 @@ from backend.services import (
     PlanningPipeline,
     PlanningState,
     PlanningStateValidationError,
-    StudySchedulerAdapter,
     UnknownPlanningEventReferenceError,
 )
 
@@ -40,7 +39,7 @@ def create_app(
     use_default_runtime = store is None and pipeline is None
     selected_store = store or MockDataStore.for_dynamic_provider_demo()
     selected_pipeline = (
-        PlanningPipeline(StudyFlowAgent(), StudySchedulerAdapter())
+        PlanningPipeline(StudyFlowAgent(), StudyScheduler())
         if use_default_runtime
         else pipeline
     )

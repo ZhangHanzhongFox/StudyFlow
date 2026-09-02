@@ -37,11 +37,10 @@ store = MockDataStore.for_dynamic_provider_demo()
 ```
 
 This is the store used by the exported `backend.main:app`. The default
-`PlanningPipeline` injects `StudyFlowAgent` and `StudySchedulerAdapter`; the
-adapter implements the stable Scheduler protocol around B's concrete
-`StudyScheduler`, supplies a reproducible mock planning clock, reports deadline
-and dependency failures through `UnscheduledTask`, and preserves unaffected
-placements during replanning.
+`PlanningPipeline` injects `StudyFlowAgent` and B's concrete `StudyScheduler`
+directly through their stable protocols. The scheduler derives a reproducible
+planning start from the provider-backed mock calendar, reports failures through
+`UnscheduledTask`, and preserves unaffected placements during replanning.
 
 ## Canvas normalization
 
