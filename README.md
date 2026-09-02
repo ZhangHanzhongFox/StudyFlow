@@ -50,6 +50,19 @@ both supplied through an injected `PlanningPipeline`, `/plan` and `/replan`
 atomically update the current tasks, schedule, and events. See
 [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
+## Deterministic scheduling
+
+`StudyScheduler` implements the shared `Scheduler` contract. It schedules
+incomplete tasks within a configurable daily study window while respecting:
+
+- assessment unlock times and deadlines;
+- task durations, dependencies, and priority;
+- hard calendar blocks;
+- completed work and preserved placements.
+
+Tasks that cannot fit are returned in `unscheduled_tasks` with a stable reason
+instead of being silently dropped.
+
 ## Agent workflow without an API key
 
 The Agent / Workflow implementation works deterministically without network

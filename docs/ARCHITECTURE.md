@@ -101,6 +101,11 @@ using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
+`StudyScheduler` implements the stable `Scheduler` protocol and is ready for C
+to inject through `PlanningPipeline`. It respects assessment unlock times and
+deadlines, dependency order, duration, priority, and hard calendar blocks;
+work that cannot fit is returned explicitly as `UnscheduledTask`.
+
 The FastAPI app currently exposes the validated shared mock data. `POST /plan`
 returns the baseline mock schedule so the frontend can integrate immediately.
 `POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
