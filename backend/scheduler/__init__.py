@@ -6,10 +6,12 @@ from .contracts import (
     SchedulingResult,
     UnscheduledTask,
 )
+from .core import StudyScheduler
 
 __all__ = [
     "Scheduler",
     "SchedulingFailureReason",
     "SchedulingResult",
+    "StudyScheduler",
     "UnscheduledTask",
 ]
