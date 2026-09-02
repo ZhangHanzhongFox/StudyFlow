@@ -51,6 +51,46 @@ def test_fixture_assessments_generate_valid_fallback_workflows(
     assert all(1 <= task.priority <= 5 for task in tasks)
 
 
+@pytest.mark.parametrize(
+    ("assessment_type", "expected_task_count"),
+    [
+        (AssessmentType.PRESENTATION, 5),
+        (AssessmentType.EXAM, 4),
+        (AssessmentType.MIDTERM, 4),
+        (AssessmentType.CODING_ASSIGNMENT, 6),
+        (AssessmentType.QUIZ, 2),
+    ],
+)
+def test_missing_description_still_uses_valid_type_fallback(
+    assessment_type: AssessmentType,
+    expected_task_count: int,
+) -> None:
+    assessments = MockDataStore().list_assessments()
+    source_type = (
+        AssessmentType.MIDTERM
+        if assessment_type in {AssessmentType.EXAM, AssessmentType.QUIZ}
+        else assessment_type
+    )
+    source = assessment_of_type(assessments, source_type)
+    assessment = source.model_copy(
+        update={
+            "id": f"assessment-empty-description-{assessment_type.value}",
+            "description": "",
+            "type": assessment_type,
+        }
+    )
+    agent = StudyFlowAgent()
+
+    tasks = agent.decompose_assessment(assessment)
+
+    assert agent.classify_assessment(assessment) is assessment_type
+    assert len(tasks) == expected_task_count
+    assert validate_task_graph(tasks) == tasks
+    assert all(task.assessment_id == assessment.id for task in tasks)
+    assert all(task.name and task.duration_minutes > 0 for task in tasks)
+    assert all(1 <= task.priority <= 5 for task in tasks)
+
+
 def test_exam_uses_the_exam_midterm_workflow_family() -> None:
     midterm = assessment_of_type(
         MockDataStore().list_assessments(),
@@ -202,6 +242,20 @@ def test_valid_structured_decomposition_becomes_canonical_tasks() -> None:
                             "priority": 4,
                             "dependency_keys": ["research"],
                         },
+                        {
+                            "step_key": "slides",
+                            "name": "Build the presentation slides",
+                            "duration_minutes": 90,
+                            "priority": 4,
+                            "dependency_keys": ["draft"],
+                        },
+                        {
+                            "step_key": "rehearsal",
+                            "name": "Rehearse the presentation",
+                            "duration_minutes": 45,
+                            "priority": 5,
+                            "dependency_keys": ["slides"],
+                        },
                     ]
                 }
             ]
@@ -213,8 +267,12 @@ def test_valid_structured_decomposition_becomes_canonical_tasks() -> None:
     assert [task.name for task in tasks] == [
         "Research the presentation topic",
         "Draft the presentation storyline",
+        "Build the presentation slides",
+        "Rehearse the presentation",
     ]
-    assert tasks[1].dependencies == [tasks[0].id]
+    assert tasks[0].dependencies == []
+    for previous, current in zip(tasks, tasks[1:]):
+        assert current.dependencies == [previous.id]
     assert validate_task_graph(tasks) == tasks
 
 
@@ -262,8 +320,76 @@ def test_valid_structured_decomposition_becomes_canonical_tasks() -> None:
                 },
             ]
         },
+        {
+            "tasks": [
+                {
+                    "step_key": "outline",
+                    "name": "Create the outline",
+                    "duration_minutes": 60,
+                    "priority": 3,
+                    "dependency_keys": [],
+                    "unexpected_field": "must be rejected",
+                }
+            ]
+        },
+        {
+            "tasks": [
+                {
+                    "step_key": "outline",
+                    "name": "Create the outline",
+                    "duration_minutes": 60,
+                    "priority": 3,
+                    "dependency_keys": [],
+                },
+                {
+                    "step_key": "outline",
+                    "name": "Create another outline",
+                    "duration_minutes": 30,
+                    "priority": 2,
+                    "dependency_keys": [],
+                },
+            ]
+        },
+        {
+            "tasks": [
+                {
+                    "step_key": "outline",
+                    "name": "Create the outline",
+                    "duration_minutes": 60,
+                    "priority": 3,
+                    "dependency_keys": ["outline"],
+                }
+            ]
+        },
+        {
+            "tasks": [
+                {
+                    "step_key": "outline",
+                    "name": "Create the outline",
+                    "duration_minutes": 60,
+                    "priority": 3,
+                    "dependency_keys": [],
+                },
+                {
+                    "step_key": "slides",
+                    "name": "Build the slides",
+                    "duration_minutes": 120,
+                    "priority": 4,
+                    "dependency_keys": ["outline", "outline"],
+                },
+            ]
+        },
     ],
-    ids=["provider_error", "invalid_schema", "unknown_dependency", "cycle"],
+    ids=[
+        "provider_error",
+        "invalid_schema",
+        "unknown_dependency",
+        "cycle",
+        "extra_field",
+        "duplicate_step_key",
+        "self_dependency",
+        "duplicate_dependency",
+    ],
 )
 def test_llm_failures_and_invalid_graphs_use_complete_fallback(
     fake_response: object,
@@ -304,6 +430,25 @@ def test_missed_task_affects_itself_and_transitive_dependents() -> None:
         "task-presentation-slides",
         "task-presentation-script",
         "task-presentation-rehearsal",
+    }
+
+
+def test_missed_task_excludes_completed_and_unrelated_tasks() -> None:
+    tasks = [
+        task.model_copy(update={"status": TaskStatus.COMPLETED})
+        if task.id == "task-presentation-rehearsal"
+        else task
+        for task in MockDataStore().list_tasks()
+    ]
+
+    affected = StudyFlowAgent().find_affected_task_ids(
+        task_event(PlanningEventType.TASK_MISSED, "task-presentation-slides"),
+        tasks,
+    )
+
+    assert affected == {
+        "task-presentation-slides",
+        "task-presentation-script",
     }
 
 
