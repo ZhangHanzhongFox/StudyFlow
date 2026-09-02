@@ -16,6 +16,9 @@ from backend.schemas import (
 from backend.services import (
     DuplicatePlanningEventError,
     MockDataStore,
+    PlanningPipeline,
+    PlanningState,
+    PlanningStateValidationError,
     UnknownPlanningEventReferenceError,
 )
 
@@ -26,7 +29,8 @@ DEFAULT_DEVELOPMENT_ORIGINS = (
 
 
 def create_app(
-    store: MockDataStore | None = None,
+    store: PlanningState | None = None,
+    pipeline: PlanningPipeline | None = None,
     allowed_origins: Sequence[str] = DEFAULT_DEVELOPMENT_ORIGINS,
 ) -> FastAPI:
     """Create an API app with an injectable data store for tests and adapters."""
@@ -90,7 +94,29 @@ def create_app(
 
     @app.post("/plan", response_model=SchedulingResult)
     def create_plan() -> SchedulingResult:
-        """Return the validated baseline until the real scheduler is injected."""
+        """Run an injected pipeline or preserve the demo-safe fallback."""
+
+        if pipeline is not None:
+            planning_run = pipeline.run_plan(
+                selected_store.list_assessments(),
+                selected_store.list_calendar_blocks(),
+                selected_store.list_scheduled_tasks(),
+            )
+            try:
+                selected_store.replace_plan(
+                    planning_run.assessments,
+                    planning_run.tasks,
+                    planning_run.result.scheduled_tasks,
+                )
+            except PlanningStateValidationError as error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": "invalid_planning_state",
+                        "message": str(error),
+                    },
+                ) from error
+            return planning_run.result
 
         return SchedulingResult(
             scheduled_tasks=selected_store.list_scheduled_tasks(),
@@ -99,19 +125,53 @@ def create_app(
 
     @app.post("/replan", response_model=SchedulingResult)
     def replan(event: PlanningEvent) -> SchedulingResult:
-        """Reserve the stable replan contract for Agent and Scheduler wiring."""
+        """Run an injected replan pipeline or keep the explicit placeholder."""
 
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "code": "replanning_not_implemented",
-                "message": (
-                    "The interface is stable, but Agent and Scheduler "
-                    "implementations have not been connected yet."
-                ),
-                "event_id": event.id,
-            },
-        )
+        if pipeline is None:
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail={
+                    "code": "replanning_not_implemented",
+                    "message": (
+                        "The interface is stable, but Agent and Scheduler "
+                        "implementations have not been connected yet."
+                    ),
+                    "event_id": event.id,
+                },
+            )
+
+        try:
+            selected_store.validate_planning_event(event)
+            result = pipeline.replan(
+                event,
+                selected_store.list_assessments(),
+                selected_store.list_tasks(),
+                selected_store.list_calendar_blocks(),
+                selected_store.list_scheduled_tasks(),
+            )
+            selected_store.replace_schedule_and_add_event(
+                result.scheduled_tasks,
+                event,
+            )
+            return result
+        except DuplicatePlanningEventError as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "duplicate_event_id", "message": str(error)},
+            ) from error
+        except UnknownPlanningEventReferenceError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "unknown_reference", "message": str(error)},
+            ) from error
+        except PlanningStateValidationError as error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "invalid_planning_state",
+                    "message": str(error),
+                },
+            ) from error
 
     return app
 

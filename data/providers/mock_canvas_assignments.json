@@ -1,0 +1,67 @@
+[
+  {
+    "id": 731001,
+    "course_id": 3103,
+    "course_code": "IS3103",
+    "name": "Responsible AI Product Pitch",
+    "description": "<p>Deliver a 10-minute group presentation covering the user problem, agent workflow, system architecture, ethics and privacy risks, a live demo, and Q&amp;A. Upload the final slides before the presentation deadline.</p>",
+    "due_at": "2026-09-12T16:00:00+08:00",
+    "unlock_at": "2026-09-01T08:00:00+08:00",
+    "points_possible": 100,
+    "submission_types": ["online_upload", "media_recording"],
+    "assignment_group_name": "Presentations",
+    "group_category_id": 4310,
+    "html_url": "https://canvas.example/courses/3103/assignments/731001",
+    "published": true,
+    "studyflow": {
+      "assessment_id": "assessment-presentation-ai-ethics",
+      "assessment_type": "presentation",
+      "weightage": 20.0,
+      "is_group": true,
+      "group_size": 4
+    }
+  },
+  {
+    "id": 742002,
+    "course_id": 2040,
+    "course_code": "CS2040S",
+    "name": "Algorithms Midterm",
+    "description": "<p>A closed-book 90-minute midterm covering asymptotic analysis, sorting, binary search trees, heaps, hashing, and graph traversal. Practice tracing algorithms and explaining time complexity.</p>",
+    "due_at": "2026-09-10T14:00:00+08:00",
+    "unlock_at": null,
+    "points_possible": 80,
+    "quiz_id": 88201,
+    "submission_types": ["online_quiz"],
+    "assignment_group_name": "Exams",
+    "html_url": "https://canvas.example/courses/2040/quizzes/88201",
+    "published": true,
+    "studyflow": {
+      "assessment_id": "assessment-midterm-algorithms",
+      "assessment_type": "midterm",
+      "weightage": 25.0,
+      "is_group": false,
+      "group_size": null
+    }
+  },
+  {
+    "id": 753003,
+    "course_id": 2103,
+    "course_code": "CS2103T",
+    "name": "StudyFlow Scheduling Assignment",
+    "description": "<p>Implement a deterministic study scheduler that respects task duration, dependency order, deadlines, and hard calendar blocks. Include automated tests and submit the repository link with a short design note.</p>",
+    "due_at": "2026-09-14T23:59:00+08:00",
+    "unlock_at": "2026-09-01T08:00:00+08:00",
+    "points_possible": 100,
+    "submission_types": ["online_upload", "online_url"],
+    "assignment_group_name": "Coding Assignments",
+    "html_url": "https://canvas.example/courses/2103/assignments/753003",
+    "published": true,
+    "studyflow": {
+      "assessment_id": "assessment-coding-studyflow",
+      "assessment_type": "coding_assignment",
+      "weightage": 30.0,
+      "is_group": false,
+      "group_size": null
+    }
+  }
+]

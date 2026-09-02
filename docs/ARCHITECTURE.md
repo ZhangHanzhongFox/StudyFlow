@@ -106,5 +106,13 @@ returns the baseline mock schedule so the frontend can integrate immediately.
 `POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
 both injected through `PlanningPipeline`.
 
-No endpoint currently writes to fixture files. New planning events are held in
-memory and reset when the process restarts.
+Canvas and Google Calendar-shaped mocks are normalized at
+`backend/integrations/` and can populate the same canonical demo state without
+changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
+schedule entries, and events in process memory with atomic reference
+validation. No endpoint writes to fixture files.
+
+`create_app()` accepts an optional `PlanningPipeline`. Without it, the stable
+fixture `/plan` and explicit `/replan` 501 behavior remain unchanged. With it,
+the API stores validated planning artifacts and replan results atomically. This
+keeps D unblocked while A and B implementations are integrated independently.

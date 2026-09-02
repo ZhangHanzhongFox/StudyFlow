@@ -10,35 +10,63 @@ from backend.schemas import (
     Assessment,
     CalendarBlock,
     PlanningEvent,
-    PlanningEventType,
     ScheduledTask,
     Task,
-    validate_task_graph,
 )
+from backend.integrations import (
+    load_canvas_assignments,
+    load_google_calendar_events,
+)
+from .state import PlanningState
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 DEFAULT_MOCK_DATA_DIR = Path(__file__).parents[2] / "data" / "mock"
+DEFAULT_PROVIDER_DATA_DIR = Path(__file__).parents[2] / "data" / "providers"
 
 
-class DuplicatePlanningEventError(ValueError):
-    """Raised when an event would overwrite an existing stable ID."""
-
-
-class UnknownPlanningEventReferenceError(ValueError):
-    """Raised when an event points outside the current planning state."""
-
-
-class MockDataStore:
+class MockDataStore(PlanningState):
     """Load canonical fixture files and keep posted events in memory."""
 
-    def __init__(self, data_dir: Path = DEFAULT_MOCK_DATA_DIR) -> None:
+    def __init__(
+        self,
+        data_dir: Path = DEFAULT_MOCK_DATA_DIR,
+        canvas_payload_path: Path | None = None,
+        calendar_payload_path: Path | None = None,
+    ) -> None:
         self.data_dir = data_dir
-        self._assessments = self._load("assessments.json", Assessment)
-        self._tasks = self._load("tasks.json", Task)
-        self._calendar_blocks = self._load("calendar_blocks.json", CalendarBlock)
-        self._scheduled_tasks = self._load("scheduled_tasks.json", ScheduledTask)
-        self._planning_events = self._load("planning_events.json", PlanningEvent)
-        validate_task_graph(self._tasks)
+        assessments = (
+            load_canvas_assignments(canvas_payload_path)
+            if canvas_payload_path is not None
+            else self._load("assessments.json", Assessment)
+        )
+        calendar_blocks = (
+            load_google_calendar_events(calendar_payload_path)
+            if calendar_payload_path is not None
+            else self._load("calendar_blocks.json", CalendarBlock)
+        )
+        super().__init__(
+            assessments=assessments,
+            tasks=self._load("tasks.json", Task),
+            calendar_blocks=calendar_blocks,
+            scheduled_tasks=self._load("scheduled_tasks.json", ScheduledTask),
+            planning_events=self._load("planning_events.json", PlanningEvent),
+        )
+
+    @classmethod
+    def from_provider_fixtures(
+        cls,
+        data_dir: Path = DEFAULT_MOCK_DATA_DIR,
+        provider_data_dir: Path = DEFAULT_PROVIDER_DATA_DIR,
+    ) -> "MockDataStore":
+        """Build the demo state through the provider normalization boundary."""
+
+        return cls(
+            data_dir=data_dir,
+            canvas_payload_path=provider_data_dir
+            / "mock_canvas_assignments.json",
+            calendar_payload_path=provider_data_dir
+            / "mock_google_calendar_events.json",
+        )
 
     def _load(self, filename: str, model: type[ModelT]) -> list[ModelT]:
         path = self.data_dir / filename
@@ -47,45 +75,3 @@ class MockDataStore:
         if not isinstance(records, list):
             raise ValueError(f"{path} must contain a JSON array")
         return [model.model_validate(record) for record in records]
-
-    def list_assessments(self) -> list[Assessment]:
-        return list(self._assessments)
-
-    def list_tasks(self) -> list[Task]:
-        return list(self._tasks)
-
-    def list_calendar_blocks(self) -> list[CalendarBlock]:
-        return list(self._calendar_blocks)
-
-    def list_scheduled_tasks(self) -> list[ScheduledTask]:
-        return list(self._scheduled_tasks)
-
-    def list_planning_events(self) -> list[PlanningEvent]:
-        return list(self._planning_events)
-
-    def add_planning_event(self, event: PlanningEvent) -> PlanningEvent:
-        if any(existing.id == event.id for existing in self._planning_events):
-            raise DuplicatePlanningEventError(
-                f"planning event id already exists: {event.id}"
-            )
-
-        reference_ids_by_type = {
-            PlanningEventType.TASK_COMPLETED: {task.id for task in self._tasks},
-            PlanningEventType.TASK_MISSED: {task.id for task in self._tasks},
-            PlanningEventType.NEW_ASSESSMENT: {
-                assessment.id for assessment in self._assessments
-            },
-            PlanningEventType.ASSESSMENT_UPDATED: {
-                assessment.id for assessment in self._assessments
-            },
-            PlanningEventType.CALENDAR_CHANGED: {
-                block.id for block in self._calendar_blocks
-            },
-        }
-        if event.reference_id not in reference_ids_by_type[event.event_type]:
-            raise UnknownPlanningEventReferenceError(
-                f"{event.event_type.value} references unknown id: {event.reference_id}"
-            )
-
-        self._planning_events.append(event)
-        return event
