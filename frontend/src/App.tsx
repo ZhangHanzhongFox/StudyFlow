@@ -8,13 +8,11 @@ import {
   Code2,
   Presentation,
   RefreshCw,
-  RotateCcw,
   Sparkles,
   TriangleAlert,
-  WandSparkles,
 } from "lucide-react";
-import { generatePlan, getDashboardData } from "./api";
-import type { Assessment, PlanningEvent, ScheduledTask, SchedulingResult } from "./types";
+import { getDashboardData } from "./api";
+import type { Assessment, PlanningEvent, ScheduledTask } from "./types";
 
 type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
@@ -46,6 +44,14 @@ function relativeDeadline(deadline: string, now: Date) {
   if (days === 0) return "Due today";
   if (days === 1) return "Due tomorrow";
   return `${days} days left`;
+}
+
+function readableTaskId(taskId: string) {
+  return taskId
+    .replace(/^task-/, "")
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function formatTime(value: string) {
@@ -91,10 +97,6 @@ export default function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [planState, setPlanState] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [planError, setPlanError] = useState<string | null>(null);
-  const [planResult, setPlanResult] = useState<SchedulingResult | null>(null);
-  const [changeSummary, setChangeSummary] = useState<string | null>(null);
   const now = useMemo(() => new Date(), []);
 
   const load = useCallback(() => {
@@ -130,47 +132,6 @@ export default function App() {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
     [data],
   );
-  const tasksById = useMemo(
-    () => new Map((data?.tasks ?? []).map((task) => [task.id, task])),
-    [data],
-  );
-
-  const handleGeneratePlan = useCallback(async () => {
-    const controller = new AbortController();
-    const previousSchedule = new Map(
-      (data?.schedule ?? []).map((task) => [task.task_id, task]),
-    );
-
-    setPlanState("loading");
-    setPlanError(null);
-    setChangeSummary(null);
-
-    try {
-      const result = await generatePlan(controller.signal);
-      const refreshed = await getDashboardData(controller.signal);
-      const latestSchedule = new Map(
-        refreshed.schedule.map((task) => [task.task_id, task]),
-      );
-      const added = refreshed.schedule.filter((task) => !previousSchedule.has(task.task_id)).length;
-      const moved = refreshed.schedule.filter((task) => {
-        const previous = previousSchedule.get(task.task_id);
-        return previous
-          && (previous.start_time !== task.start_time || previous.end_time !== task.end_time);
-      }).length;
-      const removed = [...previousSchedule.keys()].filter((taskId) => !latestSchedule.has(taskId)).length;
-
-      setData(refreshed);
-      setPlanResult(result);
-      setChangeSummary(
-        `${refreshed.schedule.length} scheduled · ${added} added · ${moved} moved · ${removed} removed`,
-      );
-      setPlanState("success");
-    } catch (reason: unknown) {
-      if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setPlanError("StudyFlow couldn’t generate and refresh the plan. Check the API, then retry.");
-      setPlanState("error");
-    }
-  }, [data]);
 
   return (
     <div className="app-shell">
@@ -189,43 +150,11 @@ export default function App() {
             <h1>Your study day, made clear.</h1>
             <p>Your plan is balanced. Here’s what the agent is watching today.</p>
           </div>
-          <div className="intro-actions">
-            <div className="loop-card" aria-label="StudyFlow agent loop">
-              <span>Plan</span><ArrowRight size={14} /><span>Act</span><ArrowRight size={14} />
-              <span>Observe</span><ArrowRight size={14} /><strong>Replan</strong>
-            </div>
-            <button
-              className="generate-button"
-              type="button"
-              onClick={handleGeneratePlan}
-              disabled={planState === "loading" || loading || Boolean(error)}
-            >
-              {planState === "loading" ? <RefreshCw className="spin" size={16} /> : <WandSparkles size={16} />}
-              {planState === "loading" ? "Generating…" : planState === "success" ? "Generate again" : "Generate Plan"}
-            </button>
+          <div className="loop-card" aria-label="StudyFlow agent loop">
+            <span>Plan</span><ArrowRight size={14} /><span>Act</span><ArrowRight size={14} />
+            <span>Observe</span><ArrowRight size={14} /><strong>Replan</strong>
           </div>
         </div>
-
-        <section className={`change-notice ${planState}`} aria-live="polite">
-          <span className="change-notice-icon">
-            {planState === "error" ? <TriangleAlert size={18} /> : planState === "loading" ? <RefreshCw className="spin" size={18} /> : <RotateCcw size={18} />}
-          </span>
-          <div>
-            <strong>{planState === "success" ? "Plan updated" : planState === "error" ? "Plan update failed" : planState === "loading" ? "Agent is generating your plan" : "Plan changes"}</strong>
-            <p>
-              {planState === "success" && changeSummary
-                ? changeSummary
-                : planState === "error"
-                  ? planError
-                  : planState === "loading"
-                    ? "Tasks, dependencies, and available time are being evaluated."
-                    : "Generate a plan to see scheduled, moved, and unscheduled work here."}
-            </p>
-          </div>
-          {planState === "error" && (
-            <button type="button" onClick={handleGeneratePlan}><RefreshCw size={14} /> Retry</button>
-          )}
-        </section>
 
         {loading && !data ? <LoadingState /> : error ? (
           <div className="error-state" role="alert">
@@ -273,31 +202,10 @@ export default function App() {
                   <article className="timeline-item" key={task.id}>
                     <div className="time-column"><strong>{formatTime(task.start_time)}</strong><span>{formatTime(task.end_time)}</span></div>
                     <div className="timeline-rail"><span className={index === 0 ? "current" : ""} /></div>
-                    <div className="task-copy">
-                      <h3>{tasksById.get(task.task_id)?.name ?? "Task details unavailable"}</h3>
-                      <span className={`flexibility ${task.flexibility}`}>{task.flexibility}</span>
-                    </div>
+                    <div className="task-copy"><h3>{readableTaskId(task.task_id)}</h3><span className={`flexibility ${task.flexibility}`}>{task.flexibility}</span></div>
                   </article>
                 ))}
               </div>
-              {planResult && planResult.unscheduled_tasks.length > 0 && (
-                <div className="unscheduled-section" role="status">
-                  <div className="unscheduled-heading">
-                    <TriangleAlert size={16} />
-                    <h3>Needs scheduling attention</h3>
-                    <span>{planResult.unscheduled_tasks.length}</span>
-                  </div>
-                  <div className="unscheduled-list">
-                    {planResult.unscheduled_tasks.map((failure) => (
-                      <article key={failure.task_id}>
-                        <strong>{tasksById.get(failure.task_id)?.name ?? "Task details unavailable"}</strong>
-                        <span>{failure.reason.replaceAll("_", " ")}</span>
-                        <p>{failure.message}</p>
-                      </article>
-                    ))}
-                  </div>
-                </div>
-              )}
             </section>
 
             <section className="panel activity-panel">

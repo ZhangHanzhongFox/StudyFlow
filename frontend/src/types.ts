@@ -26,40 +26,6 @@ export interface ScheduledTask {
   flexibility: "hard" | "soft" | "flexible";
 }
 
-export type TaskStatus =
-  | "pending"
-  | "scheduled"
-  | "in_progress"
-  | "completed"
-  | "missed";
-
-export interface Task {
-  id: string;
-  assessment_id: string;
-  name: string;
-  duration_minutes: number;
-  dependencies: string[];
-  priority: number;
-  status: TaskStatus;
-}
-
-export type SchedulingFailureReason =
-  | "no_available_slot"
-  | "deadline_constraint"
-  | "dependency_conflict"
-  | "invalid_input";
-
-export interface UnscheduledTask {
-  task_id: string;
-  reason: SchedulingFailureReason;
-  message: string;
-}
-
-export interface SchedulingResult {
-  scheduled_tasks: ScheduledTask[];
-  unscheduled_tasks: UnscheduledTask[];
-}
-
 export type PlanningEventType =
   | "task_completed"
   | "task_missed"
