@@ -1,9 +1,7 @@
 """Provider-neutral structured LLM boundary used by the agent workflow.
 
-The MVP ships with a deterministic fake implementation so the full agent path
-can be developed and tested without network access or API credentials. A real
-provider adapter can implement :class:`StructuredLLM` later without changing
-the workflow service.
+The fake implementation supports offline tests. The Bedrock adapter implements
+the same protocol without changing the workflow service or canonical schemas.
 """
 
 from collections.abc import Iterable, Mapping

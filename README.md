@@ -119,13 +119,63 @@ tasks = agent.decompose_assessment(store.list_assessments()[0])
 
 Mapping responses are validated with Pydantic before they enter business
 logic. Provider exceptions, invalid fields, unknown dependencies, and cyclic
-graphs cause the entire assessment to use its deterministic fallback. A future
-OpenAI adapter only needs to implement `StructuredLLM`; do not commit real API
-keys to the repository.
+graphs cause the entire assessment to use its deterministic fallback. Provider
+adapters implement `StructuredLLM`; do not commit real API keys to the repository.
 
 For a `task_missed` event, the agent marks the referenced task and every
 incomplete transitive dependent as affected. Completed, upstream, and unrelated
 tasks stay outside the replanning scope.
+
+## Connect Amazon Bedrock (Nova Lite)
+
+The default is offline (`STUDYFLOW_LLM_PROVIDER=none`). To enable the real LLM,
+first export the three temporary credentials from the AWS access portal into
+your terminal: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+`AWS_SESSION_TOKEN`. The hackathon guide specifies `us-east-1`; portal
+credentials expire after approximately 12 hours and must be renewed.
+
+Run these commands from the project root in that **same terminal**:
+
+```bash
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+export STUDYFLOW_LLM_PROVIDER=bedrock
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_REGION=us-east-1
+export BEDROCK_MODEL_ID=amazon.nova-lite-v1:0
+python -m backend.agents.check_bedrock
+```
+
+The check makes one paid request using a mock presentation. It prints validated
+structured output and exits nonzero on failure; it never silently uses a
+template. After it succeeds, start (or restart) the API from the same terminal:
+
+```bash
+python -m uvicorn backend.main:app --reload --log-level info
+```
+
+Open `http://127.0.0.1:8000/docs` and run `POST /plan`, then `GET /tasks` and
+`GET /schedule`. The frontend's plan action uses the same pipeline. Each full
+plan currently makes two LLM calls per assessment (six for the three demo
+assessments), with at most two SDK attempts per call. Replanning existing
+tasks remains deterministic. The original Canvas/calendar fixtures remain mocks.
+
+`BEDROCK_MAX_TOKENS` optionally controls each response limit (default 2048,
+range 1-5000). The adapter rejects truncated responses, invalid fields and
+missing tool results; the agent validates dependencies and falls back to the
+existing template on provider or validation failures. A successful `/plan`
+response alone therefore does not prove the LLM worked. Look for the warning
+`using deterministic fallback`; use the standalone check to diagnose the live
+structured-output boundary without fallback. Preparation durations are model
+estimates and still need human review.
+
+Credentials are read through the standard boto3 credential chain. Shell exports
+do not propagate into another terminal or an already running backend. `.env`
+is **not automatically loaded**; if you choose to use one, explicitly start
+Uvicorn with `--env-file .env`. Keep all credentials on the backend. Unit tests
+default to offline mode even when run in your Bedrock-enabled terminal.
+
+See [Bedrock integration details](docs/INTEGRATIONS.md#amazon-bedrock).
 
 ## Project references
 

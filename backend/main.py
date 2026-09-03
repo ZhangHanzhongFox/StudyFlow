@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.agents import StudyFlowAgent
+from backend.agents.bedrock import configured_llm
 from backend.scheduler import SchedulingResult, StudyScheduler
 from backend.schemas import (
     Assessment,
@@ -40,7 +41,7 @@ def create_app(
     use_default_runtime = store is None and pipeline is None
     selected_store = store or MockDataStore.for_dynamic_provider_demo()
     selected_pipeline = (
-        PlanningPipeline(StudyFlowAgent(), StudyScheduler())
+        PlanningPipeline(StudyFlowAgent(configured_llm()), StudyScheduler())
         if use_default_runtime
         else pipeline
     )
