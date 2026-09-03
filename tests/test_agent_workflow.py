@@ -418,7 +418,11 @@ def task_event(event_type: PlanningEventType, reference_id: str) -> PlanningEven
 
 
 def test_missed_task_affects_itself_and_transitive_dependents() -> None:
-    tasks = MockDataStore().list_tasks()
+    tasks = [
+        task.model_copy(update={"status": TaskStatus.MISSED})
+        if task.id == "task-presentation-slides" else task
+        for task in MockDataStore().list_tasks()
+    ]
     agent = StudyFlowAgent()
 
     affected = agent.find_affected_task_ids(
@@ -434,10 +438,12 @@ def test_missed_task_affects_itself_and_transitive_dependents() -> None:
 
 
 def test_missed_task_excludes_completed_and_unrelated_tasks() -> None:
+    statuses = {
+        "task-presentation-rehearsal": TaskStatus.COMPLETED,
+        "task-presentation-slides": TaskStatus.MISSED,
+    }
     tasks = [
-        task.model_copy(update={"status": TaskStatus.COMPLETED})
-        if task.id == "task-presentation-rehearsal"
-        else task
+        task.model_copy(update={"status": statuses.get(task.id, task.status)})
         for task in MockDataStore().list_tasks()
     ]
 
@@ -453,7 +459,11 @@ def test_missed_task_excludes_completed_and_unrelated_tasks() -> None:
 
 
 def test_completed_task_affects_only_incomplete_dependents() -> None:
-    tasks = MockDataStore().list_tasks()
+    tasks = [
+        task.model_copy(update={"status": TaskStatus.COMPLETED})
+        if task.id == "task-presentation-outline" else task
+        for task in MockDataStore().list_tasks()
+    ]
     agent = StudyFlowAgent()
 
     affected = agent.find_affected_task_ids(
