@@ -1,6 +1,8 @@
 """StudyFlow's fixture-backed FastAPI application skeleton."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,17 +33,28 @@ DEFAULT_DEVELOPMENT_ORIGINS = (
 )
 
 
+def current_study_time() -> datetime:
+    """The current MVP uses Singapore time for its daily study window."""
+
+    return datetime.now(ZoneInfo("Asia/Singapore"))
+
+
 def create_app(
     store: PlanningState | None = None,
     pipeline: PlanningPipeline | None = None,
     allowed_origins: Sequence[str] = DEFAULT_DEVELOPMENT_ORIGINS,
+    *,
+    clock: Callable[[], datetime] | None = None,
 ) -> FastAPI:
     """Create an API app with an injectable data store for tests and adapters."""
 
     use_default_runtime = store is None and pipeline is None
     selected_store = store or MockDataStore.for_dynamic_provider_demo()
     selected_pipeline = (
-        PlanningPipeline(StudyFlowAgent(configured_llm()), StudyScheduler())
+        PlanningPipeline(
+            StudyFlowAgent(configured_llm()),
+            StudyScheduler(clock=clock or current_study_time),
+        )
         if use_default_runtime
         else pipeline
     )

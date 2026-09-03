@@ -45,8 +45,8 @@ main { max-width: 1380px; margin: 0 auto; padding: 56px 24px 48px; }
 .change-notice p { margin: 3px 0 0; font-size: 11px; }
 .change-notice.success { border-color: #cfe0d3; background: #f4faf4; }
 .change-notice.success .change-notice-icon { color: #39735b; background: #e0eee3; }
-.change-notice.error { border-color: #ecd4ce; background: #fff8f6; }
-.change-notice.error .change-notice-icon { color: #b65f50; background: #f8e6e2; }
+.change-notice.error, .change-notice.refresh_error { border-color: #ecd4ce; background: #fff8f6; }
+.change-notice.error .change-notice-icon, .change-notice.refresh_error .change-notice-icon { color: #b65f50; background: #f8e6e2; }
 .change-notice button { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #e0c8c3; border-radius: 9px; color: #98554b; background: white; cursor: pointer; font-size: 11px; font-weight: 700; }
 .replan-notice { margin-bottom: 14px; border: 1px solid #dde4da; border-radius: 15px; background: rgba(250, 252, 247, .88); overflow: hidden; }
 .replan-notice-heading { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; min-height: 64px; padding: 13px 15px; }

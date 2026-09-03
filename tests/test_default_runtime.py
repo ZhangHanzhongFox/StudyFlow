@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+import pytest
 from fastapi import FastAPI
 
 from backend.main import create_app
@@ -19,6 +20,10 @@ from backend.schemas import (
     Task,
 )
 from backend.services import MockDataStore, PlanningPipeline
+
+
+def fixed_clock() -> datetime:
+    return datetime.fromisoformat("2026-09-04T01:00:00+08:00")
 
 
 def request(
@@ -40,7 +45,7 @@ def request(
 
 
 def test_default_plan_runs_provider_to_agent_to_real_scheduler() -> None:
-    app = create_app()
+    app = create_app(clock=fixed_clock)
 
     assert len(request(app, "GET", "/assessments").json()) == 3
     assert request(app, "GET", "/tasks").json() == []
@@ -64,7 +69,7 @@ def test_default_plan_runs_provider_to_agent_to_real_scheduler() -> None:
 
 
 def test_default_plan_is_reproducible_and_avoids_hard_blocks() -> None:
-    app = create_app()
+    app = create_app(clock=fixed_clock)
 
     first = request(app, "POST", "/plan").json()
     second = request(app, "POST", "/plan").json()
@@ -87,8 +92,57 @@ def test_default_plan_is_reproducible_and_avoids_hard_blocks() -> None:
             )
 
 
-def test_default_replan_commits_event_and_keeps_state_consistent() -> None:
+def test_live_runtime_uses_current_time_instead_of_mock_or_previous_plan(monkeypatch) -> None:
+    now = datetime.fromisoformat("2026-09-04T01:00:00+08:00")
+    monkeypatch.setattr("backend.main.current_study_time", lambda: now)
     app = create_app()
+
+    first = request(app, "POST", "/plan")
+    assert first.status_code == 200
+    schedule = first.json()["scheduled_tasks"]
+    assert min(datetime.fromisoformat(item["start_time"]) for item in schedule) == (
+        datetime.fromisoformat("2026-09-04T08:00:00+08:00")
+    )
+    assert all(datetime.fromisoformat(item["start_time"]) >= now for item in schedule)
+
+    # The same app stays open overnight. Old placements must not pin its clock.
+    now = datetime.fromisoformat("2026-09-05T12:10:30+08:00")
+    second = request(app, "POST", "/plan")
+    assert second.status_code == 200
+    schedule = second.json()["scheduled_tasks"]
+    assert min(datetime.fromisoformat(item["start_time"]) for item in schedule) == (
+        datetime.fromisoformat("2026-09-05T12:11:00+08:00")
+    )
+    assert all(datetime.fromisoformat(item["start_time"]) >= now for item in schedule)
+    assert second.json()["unscheduled_tasks"] == []
+
+
+@pytest.mark.parametrize("timestamp,expected_start", [
+    ("2026-09-04T01:00:00+08:00", "2026-09-04T08:00:00+08:00"),
+    ("2026-09-04T22:00:00+08:00", "2026-09-05T08:00:00+08:00"),
+])
+def test_live_plan_respects_daily_study_window(timestamp: str, expected_start: str) -> None:
+    app = create_app(clock=lambda: datetime.fromisoformat(timestamp))
+    response = request(app, "POST", "/plan")
+    assert response.status_code == 200
+    schedule = response.json()["scheduled_tasks"]
+    assert min(item["start_time"] for item in schedule) == expected_start
+
+
+def test_live_plan_reports_expired_deadlines_instead_of_scheduling_in_the_past() -> None:
+    app = create_app(clock=lambda: datetime.fromisoformat("2026-09-20T09:00:00+08:00"))
+    response = request(app, "POST", "/plan")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["scheduled_tasks"] == []
+    tasks = request(app, "GET", "/tasks").json()
+    assert {item["task_id"] for item in result["unscheduled_tasks"]} == {task["id"] for task in tasks}
+    assert all(item["reason"] in {"deadline_constraint", "dependency_conflict"}
+               for item in result["unscheduled_tasks"])
+
+
+def test_default_replan_commits_event_and_keeps_state_consistent() -> None:
+    app = create_app(clock=fixed_clock)
     request(app, "POST", "/plan")
     tasks = request(app, "GET", "/tasks").json()
     slides = next(task for task in tasks if "slides" in task["name"].lower())

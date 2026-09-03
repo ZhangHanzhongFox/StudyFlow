@@ -19,12 +19,12 @@
 
 ## A/B/C/D 接口衔接
 
-| 成员 | 已提供的基线 | 明天应核对/继续完成 |
+| 成员 | 已提供的基线 | 当前实现与验证 |
 |---|---|---|
 | A | `find_affected_task_ids(event, tasks)`；输入已应用状态变化；missed 排除已完成任务，包含未完成下游 | 已补齐复杂图回归和真实调用链测试，见下方 A 验收；calendar 仍返回未完成候选集合 |
-| B | `reschedule_tasks(..., *, replanning_start=None, preserve_valid_affected=False)` | 核对重排结果和更多冲突边界；为 calendar 保留有效候选排期，必要时扩展依赖影响 |
-| C | `PlanningState.replan()`；两个写接口共用事务；请求 schema 与错误响应 | 核对 API 和状态一致性；维持完整测试通过 |
-| D | `replan()`、`changeCalendar()`、`compareSchedules()`、`ApiError`、包含日历的 `getDashboardData()` | 接完成/错过按钮、日历输入、重排前后对比与错误/未排期展示 |
+| B | `reschedule_tasks(..., *, replanning_start=None, preserve_valid_affected=False)` | 已覆盖事件时间、跨日依赖、冲突、有效排期保留、无空档及连续重排 |
+| C | `PlanningState.replan()`；两个写接口共用事务；请求 schema 与错误响应 | 已覆盖重复提交、原子回滚、部分成功与结果完整性检查 |
+| D | `replan()`、`changeCalendar()`、`compareSchedules()`、`ApiError`、包含日历的 `getDashboardData()` | 已接入完成/错过、日历新增/修改、跨日期变化、错误与未排期展示；浏览器验收见下方 |
 
 B 的两个参数都是本次调用的输入，不要修改共享 Scheduler 实例的时钟。
 C 总是传 `replanning_start=event.timestamp`，calendar 事件额外传
@@ -177,9 +177,48 @@ State 提交前还会核对结果完整性：每个未完成任务必须且只�
 若写请求已经成功而后续 GET 失败，应提示“已更新，刷新失败”，只重试 GET，
 不要重新创建事件。写请求超时则检查事件历史中的原 ID；409 后也先刷新，不盲目生成新 ID。
 
+生成计划、完成/错过任务、日历提交及恢复操作共享前端操作锁，覆盖写入和随后读取的整个过程。
+界面统一禁用冲突入口，处理函数还通过同步锁防止同一轮渲染前的重复调用。
+已保存但刷新失败时，先恢复读取，再允许新的写操作；生成计划后的读取失败同样只重试 GET。
+
+已有任务或排期时，按钮显示 `Regenerate Plan`，确认提示明确说明将替换任务和排期、
+重置包括已完成工作在内的任务进度。取消确认不会发送请求；成功重建后清除旧重排结果和恢复入口。
+
+## 浏览器联合验收
+
+`frontend/tests/replan.test.cjs` 通过真实浏览器连接隔离的 FastAPI、Agent、Scheduler 和 Vite，
+复用共同验收 JSON。测试固定浏览器时间；跨日用例仅在隔离测试状态中延长 deadline。
+重新生成用例先运行真正的 `/plan`，再完成任务并重新生成，避免混用样例 ID 与生成任务 ID。
+测试服务的 `/test/reset` 只定义于 `frontend/tests/acceptance_server.py`，不会进入产品 API。
+
+在已安装后端依赖的仓库中，从 `frontend/` 运行：
+
+```bash
+# 浏览器验收的可选依赖，不修改项目 manifest 或 lockfile。
+npm install --no-save --package-lock=false playwright@1.62.1
+npx playwright install chromium
+npm run test:e2e
+```
+
+默认 Python 为根目录 `.venv/bin/python`；可通过 `STUDYFLOW_TEST_PYTHON` 指定。
+也可用 `STUDYFLOW_TEST_BROWSER` 指向本机 Chrome 可执行文件，代替下载 Chromium。
+测试使用随机本地端口、独立内存状态和临时浏览器上下文，结束后关闭服务。
+
+验收覆盖：missed 及下游移动、日历新增/修改、无法排期的原因、completed 保留、跨日展示、
+重新生成确认/取消与操作互斥、Plan/Replan 写入成功后只重试读取、写入失败后的原事件重试，
+以及响应丢失后通过事件历史恢复且不重复提交。
+
+正常运行模式的额外验收使用默认 `create_app(clock=...)`，将系统时间固定在 mock 日历之后的
+9 月 4 日，确认生成计划后 Today's Plan 显示当天任务。默认 API 每次排期读取当前新加坡时间，
+不会继续沿用旧 mock 或上次计划的起始日期。
+
+2026-09-04 本地复验：后端 173 项测试、Chrome 浏览器 11 项验收全部通过；
+前端 TypeScript 检查和生产构建通过。此结果覆盖 mock + 确定性 Agent/Scheduler 的
+9 月 3 日核心闭环，不等同于真实云服务验证或团队人工签收。
+
 ## 当前边界
 
-- 前端按钮、日历编辑及完整演示交互还需要 D 接入。
+- 前端交互已接入并提供可重复运行的浏览器联合验收；团队人工签收仍需各成员确认。
 - `POST /plan` 仍是重新生成计划，不能用作 Replan 后的刷新或保留执行进度的入口。
 - 状态是单进程内存；重启清空，无定时观察、数据库或多用户隔离。
 - 已完成任务和 hard 排期不可移动。新增日历与它们冲突时返回 422 并保持旧状态。

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import heapq
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import TypeAlias
 
@@ -42,6 +42,8 @@ class StudyScheduler:
         daily_start_hour: int = 8,
         daily_end_hour: int = 22,
         planning_start: datetime | None = None,
+        *,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not 0 <= daily_start_hour <= 23:
             raise ValueError("daily_start_hour must be between 0 and 23")
@@ -55,6 +57,7 @@ class StudyScheduler:
         self.daily_start_hour = daily_start_hour
         self.daily_end_hour = daily_end_hour
         self.planning_start = planning_start
+        self._clock = clock
 
     def schedule_tasks(
         self,
@@ -440,6 +443,14 @@ class StudyScheduler:
     ) -> datetime:
         if self.planning_start is not None:
             return self.planning_start
+        if self._clock is not None:
+            # Read at scheduling time, not server startup or the previous plan.
+            now = self._clock()
+            require_timezone_aware(now, "clock")
+            # Keep minute-aligned slots without rounding into the past.
+            if now.second or now.microsecond:
+                now = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            return now
         if existing_schedule:
             return min(item.start_time for item in existing_schedule)
         if calendar_blocks:

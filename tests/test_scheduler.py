@@ -64,6 +64,21 @@ def make_scheduler() -> StudyScheduler:
     return StudyScheduler(planning_start=PLANNING_START)
 
 
+def test_explicit_demo_start_takes_precedence_over_live_clock() -> None:
+    scheduler = StudyScheduler(
+        planning_start=PLANNING_START,
+        clock=lambda: datetime(2026, 9, 20, 9, tzinfo=SGT),
+    )
+    result = scheduler.schedule_tasks([make_assessment()], [make_task("task-1")], [])
+    assert result.scheduled_tasks[0].start_time == PLANNING_START
+
+
+def test_clock_must_be_timezone_aware() -> None:
+    scheduler = StudyScheduler(clock=lambda: datetime(2026, 9, 2, 9))
+    with pytest.raises(ValueError, match="timezone"):
+        scheduler.schedule_tasks([make_assessment()], [make_task("task-1")], [])
+
+
 def test_schedule_tasks_respects_dependencies_deadline_and_hard_blocks() -> None:
     tasks = [
         make_task("research", duration_minutes=60, priority=3),
