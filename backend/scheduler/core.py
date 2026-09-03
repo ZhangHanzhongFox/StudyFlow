@@ -104,12 +104,15 @@ class StudyScheduler:
         calendar_blocks: Sequence[CalendarBlock],
         existing_schedule: Sequence[ScheduledTask],
         affected_task_ids: set[str],
+        *,
+        replanning_start: datetime | None = None,
+        preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
         """Re-place affected work while preserving unaffected placements.
 
-        A's affected-task discovery is expected to include dependent tasks.
-        Completed tasks and hard scheduled placements remain preserved even if
-        they appear in the affected set.
+        New placements start no earlier than the observation. Calendar changes
+        can preserve valid candidates. Completed work and hard placements are
+        immutable; contradictory calendar changes are rejected.
         """
 
         assessment_list = list(assessments)
@@ -125,32 +128,99 @@ class StudyScheduler:
             unknown = ", ".join(sorted(unknown_affected))
             raise ValueError(f"affected tasks are unknown: {unknown}")
 
-        preserve_task_ids = {
+        default_start = self._resolve_planning_start(
+            assessment_list, block_list, existing_list,
+        )
+        if replanning_start is not None:
+            require_timezone_aware(replanning_start, "replanning_start")
+        # Browsers often send UTC timestamps. Study hours still belong to the
+        # schedule's timezone, not to the event's serialization offset.
+        planning_start = (
+            replanning_start.astimezone(default_start.tzinfo)
+            if replanning_start is not None else default_start
+        )
+        immutable_ids = {
             task.id
             for task in task_list
-            if task.id not in affected_task_ids
-            or task.status is TaskStatus.COMPLETED
+            if task.status is TaskStatus.COMPLETED
         }
-        preserve_task_ids.update(
+        immutable_ids.update(
             placement.task_id
             for placement in existing_list
             if placement.flexibility is Flexibility.HARD
         )
+        placements_by_task = {item.task_id: item for item in existing_list}
+        if len(placements_by_task) != len(existing_list):
+            raise ValueError("multiple existing placements for a task")
+        invalid_ids: set[str] = set()
+        for placement in existing_list:
+            task = tasks_by_id.get(placement.task_id)
+            if task is None:
+                raise ValueError(f"placement references unknown task: {placement.task_id}")
+            if task.status is TaskStatus.MISSED and placement.flexibility is Flexibility.HARD:
+                raise ValueError(f"Cannot automatically move missed hard task: {task.id}")
+            assessment = assessments_by_id[task.assessment_id]
+            conflicts = any(
+                block.flexibility is Flexibility.HARD
+                and placement.start_time < block.end_time
+                and block.start_time < placement.end_time
+                for block in block_list
+            )
+            invalid = (
+                conflicts
+                or placement.end_time > assessment.deadline
+                or (assessment.unlock_at is not None
+                    and placement.start_time < assessment.unlock_at)
+                or placement.end_time - placement.start_time
+                != timedelta(minutes=task.duration_minutes)
+            )
+            if invalid:
+                if task.id in immutable_ids:
+                    raise ValueError(
+                        f"Calendar or assessment conflicts with immutable task: {task.id}"
+                    )
+                invalid_ids.add(task.id)
+
+        target_task_ids = set(affected_task_ids) - immutable_ids
+        if preserve_valid_affected:
+            target_task_ids = {
+                task_id for task_id in target_task_ids
+                if task_id not in placements_by_task
+                or task_id in invalid_ids
+                or tasks_by_id[task_id].status is TaskStatus.MISSED
+            }
+        target_task_ids.update(invalid_ids)
+        # A supplies semantic scope; B also repairs dependencies invalidated by
+        # changed calendar constraints or by an injected agent's narrow scope.
+        for task in self._topological_sort(task_list):
+            placement = placements_by_task.get(task.id)
+            invalid_dependency = any(
+                dependency_id in target_task_ids
+                or (tasks_by_id[dependency_id].status is not TaskStatus.COMPLETED
+                    and dependency_id not in placements_by_task)
+                or (placement is not None
+                    and dependency_id in placements_by_task
+                    and placements_by_task[dependency_id].end_time > placement.start_time)
+                for dependency_id in task.dependencies
+            )
+            if invalid_dependency and task.status is not TaskStatus.COMPLETED:
+                if task.id in immutable_ids:
+                    raise ValueError(f"Replanning would invalidate hard task: {task.id}")
+                target_task_ids.add(task.id)
+
+        preserve_task_ids = tasks_by_id.keys() - target_task_ids
         preserved = self._preserve_existing(
             existing_list,
             tasks_by_id,
             preserve_task_ids,
         )
-        planning_start = self._resolve_planning_start(
-            assessment_list,
-            block_list,
-            existing_list,
-        )
-        target_task_ids = {
-            task_id
-            for task_id in affected_task_ids
-            if task_id not in preserve_task_ids
-        }
+        for index, placement in enumerate(preserved):
+            if any(
+                placement.start_time < other.end_time
+                and other.start_time < placement.end_time
+                for other in preserved[:index]
+            ):
+                raise ValueError("preserved schedule contains overlapping tasks")
         return self._schedule_selected(
             task_list,
             assessments_by_id,

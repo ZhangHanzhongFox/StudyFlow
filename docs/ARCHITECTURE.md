@@ -78,6 +78,18 @@ B must return an `UnscheduledTask` with a machine-readable reason when a task
 cannot be placed. It must not silently drop work. A may then decide whether to
 decompose differently, adjust estimates, or ask the user for a decision.
 
+Observation writes now use `PlanningState.replan`: under one state lock, C
+stages task status and an optional calendar upsert, runs A/B, validates the
+result, then commits tasks, calendar, schedule and event together. No state is
+published on exceptions. `/replan` takes a bare event; `/calendar-changes`
+takes the `CalendarChangeRequest` wrapper, without changing domain fields.
+
+The pipeline passes `event.timestamp` as `replanning_start` to the Scheduler.
+For calendar events it also sets `preserve_valid_affected=True`; A's broad
+candidate set does not force all valid tasks to move. B checks actual time
+constraints and propagates necessary dependency moves. See
+[REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for the implemented shared baseline.
+
 ## Stable Python interfaces
 
 - `AgentWorkflow` in `backend/agents/contracts.py`
@@ -101,15 +113,16 @@ using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
-`StudyScheduler` implements the stable `Scheduler` protocol and is ready for C
-to inject through `PlanningPipeline`. It respects assessment unlock times and
+`StudyScheduler` implements the stable `Scheduler` protocol and is injected by
+C through `PlanningPipeline`. It respects assessment unlock times and
 deadlines, dependency order, duration, priority, and hard calendar blocks;
 work that cannot fit is returned explicitly as `UnscheduledTask`.
 
-The FastAPI app currently exposes the validated shared mock data. `POST /plan`
-returns the baseline mock schedule so the frontend can integrate immediately.
-`POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
-both injected through `PlanningPipeline`.
+The exported FastAPI app normalizes provider-shaped mock data and injects the
+real `StudyFlowAgent` and `StudyScheduler` through `PlanningPipeline`.
+`POST /plan` generates canonical tasks and a dynamic schedule, then atomically
+publishes both through the planning state. `GET /tasks` and `GET /schedule`
+therefore always reflect the latest successful run.
 
 Canvas and Google Calendar-shaped mocks are normalized at
 `backend/integrations/` and can populate the same canonical demo state without
@@ -117,7 +130,6 @@ changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
 schedule entries, and events in process memory with atomic reference
 validation. No endpoint writes to fixture files.
 
-`create_app()` accepts an optional `PlanningPipeline`. Without it, the stable
-fixture `/plan` and explicit `/replan` 501 behavior remain unchanged. With it,
-the API stores validated planning artifacts and replan results atomically. This
-keeps D unblocked while A and B implementations are integrated independently.
+`create_app()` still accepts an explicit store and optional pipeline for tests.
+Passing a store without a pipeline retains the stable fixture `/plan` and
+explicit `/replan` 501 behavior, without changing the public API shape.

@@ -13,13 +13,14 @@ to `create_app()` by the deployment or test configuration.
 |---|---|---|---|
 | `GET` | `/health` | status object | Reports mock data mode |
 | `GET` | `/assessments` | `Assessment[]` | Validated shared fixtures |
-| `GET` | `/tasks` | `Task[]` | Validated shared fixtures |
+| `GET` | `/tasks` | `Task[]` | Latest generated planning state |
 | `GET` | `/calendar-blocks` | `CalendarBlock[]` | Validated shared fixtures |
-| `GET` | `/schedule` | `ScheduledTask[]` | Baseline fixture schedule |
-| `GET` | `/planning-events` | `PlanningEvent[]` | Fixture events plus in-memory posts |
+| `GET` | `/schedule` | `ScheduledTask[]` | Latest generated planning state |
+| `GET` | `/planning-events` | `PlanningEvent[]` | Current in-memory observation history |
 | `POST` | `/planning-events` | `PlanningEvent` | Validates and stores an event in memory |
-| `POST` | `/plan` | `SchedulingResult` | Fixture fallback, or injected pipeline result |
-| `POST` | `/replan` | `SchedulingResult` | HTTP 501 until a pipeline is injected |
+| `POST` | `/plan` | `SchedulingResult` | Runs the default or injected Agent → Scheduler pipeline |
+| `POST` | `/replan` | `SchedulingResult` | Runs affected-task discovery and dependency-injected rescheduling |
+| `POST` | `/calendar-changes` | `SchedulingResult` | Upserts one calendar block and replans in one transaction |
 
 FastAPI also provides generated OpenAPI documentation at `/docs` while the
 application is running.
@@ -60,6 +61,11 @@ Allowed failure reasons are:
 
 ## Posting an observation
 
+For UI actions that must replan, **POST the event directly to `/replan`**.
+Do not first POST the same event to `/planning-events`: `/replan` also records
+the event, and duplicate IDs return 409. `/planning-events` remains the
+observation-only endpoint; it updates task status but does not reschedule.
+
 ```http
 POST /planning-events
 Content-Type: application/json
@@ -89,18 +95,125 @@ Invalid schema input returns FastAPI's standard HTTP 422 validation response.
 An event with a valid shape but an unknown `reference_id` also returns HTTP 422
 with `detail.code = unknown_reference`.
 
-## Replan placeholder
+## September 3 integration contract
 
-`POST /replan` already accepts a canonical `PlanningEvent`, which is the future
-trigger passed to `PlanningPipeline.replan()`. Until the Agent and Scheduler are
-connected it returns HTTP 501 with `detail.code = replanning_not_implemented`.
-This prevents clients from mistaking an unchanged baseline for a successful
-adaptive replan.
+### Task observation and replanning
 
-When `create_app(..., pipeline=planning_pipeline)` is configured, `/plan`
-stores the pipeline's classified assessments, generated tasks, and schedule in
-the in-memory planning state. `/replan` pre-validates the event, invokes the
-pipeline, atomically replaces the schedule, and then appends the event.
+`POST /replan` takes a bare canonical `PlanningEvent`. For task actions use
+`task_missed` or `task_completed`, and take `reference_id` from `GET /tasks`.
+Generate one event ID per user action (for example, `crypto.randomUUID()`).
+Use the actual observation time, including timezone. Fixed demo timestamps
+must be visibly identified as simulation data.
+
+The backend stages task status **before** invoking the Agent and Scheduler.
+`PlanningPipeline.replan` passes `event.timestamp` as the keyword argument
+`replanning_start` to `Scheduler.reschedule_tasks`. New placements cannot
+start before that instant. UTC (`Z`) and offset timestamps representing the
+same instant produce the same result; daily study hours use the schedule's
+timezone, not the timestamp's serialization offset. Existing valid history
+does not move merely because it precedes the event.
+
+Completed work stays completed. Marking a completed task missed is rejected
+with 422 `invalid_replanning_input` (or `invalid_planning_event` through the
+observation-only endpoint). A missed task successfully placed again becomes
+`scheduled`; its missed observation remains in event history. A missed task
+that cannot fit stays `missed`. Other formerly scheduled tasks that lose their
+placement become `pending` rather than incorrectly remaining `scheduled`.
+
+### Calendar changes
+
+`POST /calendar-changes` accepts the `CalendarChangeRequest` HTTP wrapper:
+
+```json
+{
+  "event": {
+    "id": "event-calendar-extra-lecture-1",
+    "event_type": "calendar_changed",
+    "timestamp": "2026-09-03T09:00:00+08:00",
+    "reference_id": "calendar-extra-lecture"
+  },
+  "calendar_block": {
+    "id": "calendar-extra-lecture",
+    "title": "Extra lecture",
+    "start_time": "2026-09-03T09:00:00+08:00",
+    "end_time": "2026-09-03T10:00:00+08:00",
+    "flexibility": "hard"
+  }
+}
+```
+
+This inserts a new block ID or replaces the complete block with that ID.
+It does not delete other blocks. Deletion is outside this contract.
+The event must be `calendar_changed`, its reference must match the supplied
+block ID, and the block must have a valid timezone-aware time range. Invalid
+wrappers return standard FastAPI 422 validation details.
+
+The backend stages the new calendar before reference validation and planning,
+so a new block does not have to exist in the old state. Calendar events set
+`preserve_valid_affected=True` on the Scheduler: A may return all incomplete
+tasks for consideration, while B keeps valid placements and moves conflicting
+work and necessary dependents. Hard placements and completed history are
+immutable. A change that would overlap them is rejected with 422
+`invalid_replanning_input`, with no calendar or event mutation.
+Likewise, a missed task with a hard placement cannot be moved automatically;
+the request is rejected rather than falsely reporting a successful recovery.
+
+A bare `calendar_changed` event sent to `/replan` only re-evaluates the existing
+calendar; it cannot convey a new block or new times. Use `/calendar-changes`
+for user edits.
+
+### Results, failure and refresh
+
+Both endpoints return the existing `SchedulingResult` shape:
+
+- `scheduled_tasks` is the **complete resulting schedule**, including preserved
+  entries, not just the moved tasks.
+- `unscheduled_tasks` describes placement failures found in this run. A lack of
+  available time is a normal 200 result: save the valid partial schedule,
+  calendar changes, task states, and event together.
+- Invalid input (422), duplicate event IDs (409), or runtime failures (500)
+  leave all four collections unchanged. Duplicate IDs are rejected, not
+  automatically replayed. After an uncertain network failure, refresh state
+  and check `/planning-events` for the original ID before creating another
+  observation. Retrying that ID returns 409 if it already committed.
+
+For this single-process demo, observation transactions serialize snapshot,
+planning and commit under the state lock. Separate GET requests are not a
+versioned snapshot across concurrent users. Automatic polling, persistent
+storage, and multi-user isolation are outside this contract.
+
+D saves the old schedule before submitting, compares by `task_id` and absolute
+start/end times, and shows added/moved/removed tasks plus failure messages.
+After success, refresh `/tasks`, `/schedule`, `/planning-events`, and
+`/calendar-blocks`. Do not call `/plan` to refresh: that route regenerates
+tasks. Failure details should remain visible until the next planning action;
+`GET /schedule` alone cannot reconstruct the previous failure list.
+
+`frontend/src/api.ts` exports `replan`, `changeCalendar`, `compareSchedules`,
+and `ApiError` (`status`, `code`, `message`). `getDashboardData` also includes
+`calendarBlocks`. These functions are ready for D to wire into UI actions;
+the completed/missed buttons and calendar form are not implemented here.
+
+See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for ownership, common test inputs,
+expected times, and the reproducible verification command.
+
+## Runtime modes
+
+`backend.main:app` is the provider-backed dynamic demo runtime. It normalizes
+provider-shaped mocks into canonical assessments and calendar blocks, starts
+with no precomputed tasks or schedule, and runs the real Agent and Scheduler
+after `POST /plan`.
+
+Passing an explicit store without a pipeline, such as
+`create_app(MockDataStore())`, preserves the baseline fixture behavior for
+contract tests and isolated frontend work. In that explicit fallback mode,
+`POST /replan` returns HTTP 501 with
+`detail.code = replanning_not_implemented`.
+
+In dynamic mode, `/plan` stores the pipeline's classified assessments,
+generated tasks, and schedule in the in-memory planning state. `/replan` and
+`/calendar-changes` stage changes, validate input, invoke the pipeline, and
+atomically commit task states, calendar blocks, schedule and event.
 
 If an injected Agent or Scheduler returns references that cannot form a valid
 planning state, the API rejects the result with HTTP 500:
@@ -113,3 +226,9 @@ planning state, the API rejects the result with HTTP 500:
   }
 }
 ```
+
+Pipeline input failures return HTTP 422 with
+`detail.code = invalid_planning_input` or `invalid_replanning_input`.
+Unexpected runtime failures return HTTP 500 with `detail.code = planning_failed`
+or `replanning_failed`. Failed runs do not partially replace tasks, schedules,
+or planning events. Duplicate event IDs continue to return HTTP 409.

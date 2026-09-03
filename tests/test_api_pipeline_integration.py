@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -76,6 +77,9 @@ class FixtureScheduler:
         calendar_blocks: Sequence[CalendarBlock],
         existing_schedule: Sequence[ScheduledTask],
         affected_task_ids: set[str],
+        *,
+        replanning_start: datetime | None = None,
+        preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
         return SchedulingResult(scheduled_tasks=self.scheduled_tasks)
 

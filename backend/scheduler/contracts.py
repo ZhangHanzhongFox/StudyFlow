@@ -1,6 +1,7 @@
 """Stable inputs and outputs for deterministic scheduling."""
 
 from collections.abc import Sequence
+from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
@@ -61,7 +62,15 @@ class Scheduler(Protocol):
         calendar_blocks: Sequence[CalendarBlock],
         existing_schedule: Sequence[ScheduledTask],
         affected_task_ids: set[str],
+        *,
+        replanning_start: datetime | None = None,
+        preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
-        """Re-place affected tasks while preserving valid unaffected work."""
+        """Return the full schedule and explicit failures for this run.
+
+        replanning_start bounds new placements; it never shifts history.
+        Calendar observations set preserve_valid_affected to avoid moving
+        valid placements merely because their tasks were reconsidered.
+        """
 
         ...

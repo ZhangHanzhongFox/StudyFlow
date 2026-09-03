@@ -18,13 +18,19 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Run the fixture-backed API:
+Run the provider-backed dynamic API:
 
 ```bash
 uvicorn backend.main:app --reload
 ```
 
 Then open `http://127.0.0.1:8000/docs` for the generated API documentation.
+
+The default app loads Canvas- and Google Calendar-shaped mock payloads through
+the integration adapters, then runs `StudyFlowAgent → PlanningPipeline →
+StudyScheduler` when `POST /plan` is called. The generated tasks and schedule
+are committed to the in-memory planning state and immediately appear from
+`GET /tasks` and `GET /schedule`.
 
 Run tests:
 
@@ -44,10 +50,11 @@ from backend.services import MockDataStore
 store = MockDataStore.from_provider_fixtures()
 ```
 
-The API uses validated, process-local planning state. Its default `/plan`
-fixture fallback remains available for frontend development. When A and B are
-both supplied through an injected `PlanningPipeline`, `/plan` and `/replan`
-atomically update the current tasks, schedule, and events. See
+The API uses validated, process-local planning state. The exported FastAPI app
+now uses the real deterministic Agent and Scheduler implementations by default.
+Tests and isolated consumers can still pass `create_app(MockDataStore())` to
+exercise the original baseline response without a dynamic pipeline. `/plan`
+and `/replan` atomically update the current tasks, schedule, and events. See
 [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ## Deterministic scheduling
@@ -122,6 +129,7 @@ tasks stay outside the replanning scope.
 
 ## Project references
 
+- [September 3 Replan handoff and acceptance scenarios](docs/REPLAN_HANDOFF.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [API contract](docs/API_CONTRACT.md)
 - [Canonical data models](docs/DATA_MODELS.md)

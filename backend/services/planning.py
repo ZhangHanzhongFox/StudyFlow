@@ -9,6 +9,7 @@ from backend.schemas import (
     Assessment,
     CalendarBlock,
     PlanningEvent,
+    PlanningEventType,
     ScheduledTask,
     Task,
     validate_task_graph,
@@ -91,4 +92,8 @@ class PlanningPipeline:
             calendar_blocks,
             existing_schedule,
             affected_task_ids,
+            replanning_start=event.timestamp,
+            preserve_valid_affected=(
+                event.event_type is PlanningEventType.CALENDAR_CHANGED
+            ),
         )

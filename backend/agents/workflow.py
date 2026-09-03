@@ -263,7 +263,8 @@ class StudyFlowAgent:
         descendants = self._find_descendant_ids(referenced_task.id, task_list)
         affected_descendants = descendants & incomplete_ids
         if event.event_type is PlanningEventType.TASK_MISSED:
-            affected_descendants.add(referenced_task.id)
+            if referenced_task.id in incomplete_ids:
+                affected_descendants.add(referenced_task.id)
         return affected_descendants
 
     @staticmethod

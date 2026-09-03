@@ -5,10 +5,12 @@ from collections.abc import Sequence
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.scheduler import SchedulingResult
+from backend.agents import StudyFlowAgent
+from backend.scheduler import SchedulingResult, StudyScheduler
 from backend.schemas import (
     Assessment,
     CalendarBlock,
+    CalendarChangeRequest,
     PlanningEvent,
     ScheduledTask,
     Task,
@@ -35,7 +37,13 @@ def create_app(
 ) -> FastAPI:
     """Create an API app with an injectable data store for tests and adapters."""
 
-    selected_store = store or MockDataStore()
+    use_default_runtime = store is None and pipeline is None
+    selected_store = store or MockDataStore.for_dynamic_provider_demo()
+    selected_pipeline = (
+        PlanningPipeline(StudyFlowAgent(), StudyScheduler())
+        if use_default_runtime
+        else pipeline
+    )
     app = FastAPI(
         title="StudyFlow API",
         version="0.1.0",
@@ -91,18 +99,23 @@ def create_app(
                 status_code=422,
                 detail={"code": "unknown_reference", "message": str(error)},
             ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_planning_event", "message": str(error)},
+            ) from error
 
     @app.post("/plan", response_model=SchedulingResult)
     def create_plan() -> SchedulingResult:
         """Run an injected pipeline or preserve the demo-safe fallback."""
 
-        if pipeline is not None:
-            planning_run = pipeline.run_plan(
-                selected_store.list_assessments(),
-                selected_store.list_calendar_blocks(),
-                selected_store.list_scheduled_tasks(),
-            )
+        if selected_pipeline is not None:
             try:
+                planning_run = selected_pipeline.run_plan(
+                    selected_store.list_assessments(),
+                    selected_store.list_calendar_blocks(),
+                    selected_store.list_scheduled_tasks(),
+                )
                 selected_store.replace_plan(
                     planning_run.assessments,
                     planning_run.tasks,
@@ -116,6 +129,22 @@ def create_app(
                         "message": str(error),
                     },
                 ) from error
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "invalid_planning_input",
+                        "message": str(error),
+                    },
+                ) from error
+            except Exception as error:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": "planning_failed",
+                        "message": "The planning pipeline could not complete.",
+                    },
+                ) from error
             return planning_run.result
 
         return SchedulingResult(
@@ -125,9 +154,22 @@ def create_app(
 
     @app.post("/replan", response_model=SchedulingResult)
     def replan(event: PlanningEvent) -> SchedulingResult:
-        """Run an injected replan pipeline or keep the explicit placeholder."""
+        """Observe and replan once; do not pre-post this event elsewhere."""
 
-        if pipeline is None:
+        return run_replan(event)
+
+    @app.post("/calendar-changes", response_model=SchedulingResult)
+    def change_calendar(change: CalendarChangeRequest) -> SchedulingResult:
+        """Upsert one block and replan atomically, including new block IDs."""
+
+        return run_replan(change.event, change.calendar_block)
+
+    def run_replan(
+        event: PlanningEvent,
+        calendar_block: CalendarBlock | None = None,
+    ) -> SchedulingResult:
+
+        if selected_pipeline is None:
             raise HTTPException(
                 status_code=status.HTTP_501_NOT_IMPLEMENTED,
                 detail={
@@ -141,19 +183,9 @@ def create_app(
             )
 
         try:
-            selected_store.validate_planning_event(event)
-            result = pipeline.replan(
-                event,
-                selected_store.list_assessments(),
-                selected_store.list_tasks(),
-                selected_store.list_calendar_blocks(),
-                selected_store.list_scheduled_tasks(),
+            return selected_store.replan(
+                event, selected_pipeline, calendar_block,
             )
-            selected_store.replace_schedule_and_add_event(
-                result.scheduled_tasks,
-                event,
-            )
-            return result
         except DuplicatePlanningEventError as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -170,6 +202,22 @@ def create_app(
                 detail={
                     "code": "invalid_planning_state",
                     "message": str(error),
+                },
+            ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_replanning_input",
+                    "message": str(error),
+                },
+            ) from error
+        except Exception as error:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "replanning_failed",
+                    "message": "The replanning pipeline could not complete.",
                 },
             ) from error
 

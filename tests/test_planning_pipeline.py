@@ -1,6 +1,7 @@
 """Tests for the orchestration boundary between Agent and Scheduler."""
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from backend.agents import StudyFlowAgent
 from backend.scheduler import SchedulingResult
@@ -66,6 +67,9 @@ class RecordingScheduler:
         calendar_blocks: Sequence[CalendarBlock],
         existing_schedule: Sequence[ScheduledTask],
         affected_task_ids: set[str],
+        *,
+        replanning_start: datetime | None = None,
+        preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
         self.affected_task_ids_received = set(affected_task_ids)
         return SchedulingResult(scheduled_tasks=list(existing_schedule))

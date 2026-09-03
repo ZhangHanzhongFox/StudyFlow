@@ -1,0 +1,138 @@
+{
+  "description": "Each scenario starts from the same state. All dates use a fixed demo clock on 2026-09-03.",
+  "initial_state": {
+    "assessments": [
+      {
+        "id": "assessment-1",
+        "course_code": "CS1000",
+        "title": "assessment-1",
+        "description": "Assessment instructions",
+        "type": "exam",
+        "unlock_at": null,
+        "deadline": "2026-09-03T18:00:00+08:00",
+        "weightage": null,
+        "is_group": false,
+        "group_size": null
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task-research",
+        "assessment_id": "assessment-1",
+        "name": "task-research",
+        "duration_minutes": 60,
+        "dependencies": [],
+        "priority": 1,
+        "status": "completed"
+      },
+      {
+        "id": "task-slides",
+        "assessment_id": "assessment-1",
+        "name": "task-slides",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-research"
+        ],
+        "priority": 1,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-script",
+        "assessment_id": "assessment-1",
+        "name": "task-script",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-slides"
+        ],
+        "priority": 1,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-independent",
+        "assessment_id": "assessment-1",
+        "name": "task-independent",
+        "duration_minutes": 60,
+        "dependencies": [],
+        "priority": 1,
+        "status": "scheduled"
+      }
+    ],
+    "calendar_blocks": [],
+    "scheduled_tasks": [
+      {
+        "id": "scheduled-task-research",
+        "task_id": "task-research",
+        "start_time": "2026-09-03T08:00:00+08:00",
+        "end_time": "2026-09-03T09:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-slides",
+        "task_id": "task-slides",
+        "start_time": "2026-09-03T09:00:00+08:00",
+        "end_time": "2026-09-03T10:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-script",
+        "task_id": "task-script",
+        "start_time": "2026-09-03T10:00:00+08:00",
+        "end_time": "2026-09-03T11:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-independent",
+        "task_id": "task-independent",
+        "start_time": "2026-09-03T15:00:00+08:00",
+        "end_time": "2026-09-03T16:00:00+08:00",
+        "flexibility": "flexible"
+      }
+    ],
+    "planning_events": []
+  },
+  "scenarios": {
+    "missed": {
+      "endpoint": "/replan",
+      "request": {
+        "id": "event-acceptance-missed",
+        "event_type": "task_missed",
+        "timestamp": "2026-09-03T10:30:00+08:00",
+        "reference_id": "task-slides"
+      },
+      "expected_start_times": {
+        "task-slides": "2026-09-03T10:30:00+08:00",
+        "task-script": "2026-09-03T11:30:00+08:00"
+      },
+      "preserved_task_ids": [
+        "task-research",
+        "task-independent"
+      ]
+    },
+    "calendar_changed": {
+      "endpoint": "/calendar-changes",
+      "request": {
+        "event": {
+          "id": "event-acceptance-calendar",
+          "event_type": "calendar_changed",
+          "timestamp": "2026-09-03T09:00:00+08:00",
+          "reference_id": "calendar-extra-lecture"
+        },
+        "calendar_block": {
+          "id": "calendar-extra-lecture",
+          "title": "Extra lecture",
+          "start_time": "2026-09-03T09:00:00+08:00",
+          "end_time": "2026-09-03T10:00:00+08:00",
+          "flexibility": "hard"
+        }
+      },
+      "expected_start_times": {
+        "task-slides": "2026-09-03T10:00:00+08:00",
+        "task-script": "2026-09-03T11:00:00+08:00"
+      },
+      "preserved_task_ids": [
+        "task-research",
+        "task-independent"
+      ]
+    }
+  }
+}
