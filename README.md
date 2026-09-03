@@ -32,6 +32,16 @@ StudyScheduler` when `POST /plan` is called. The generated tasks and schedule
 are committed to the in-memory planning state and immediately appear from
 `GET /tasks` and `GET /schedule`.
 
+The normal API uses the current Singapore time when each plan is scheduled,
+rounded up to the next minute when necessary. Old mock calendar dates and
+previous plans do not move new tasks into the past. Daily study hours still
+apply: a plan generated after the study window starts on the next available
+day. Expired deadlines produce explicit unscheduled tasks.
+
+For reproducible tests, inject `create_app(clock=...)` or use a scheduler with
+an explicit `planning_start`. A standalone scheduler without either clock
+option retains the fixture-based date inference used by the existing demos.
+
 Run tests:
 
 ```bash

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -172,7 +173,7 @@ def test_default_api_uses_bedrock_results_and_schedules_dependencies(monkeypatch
     )
     monkeypatch.setenv("STUDYFLOW_LLM_PROVIDER", "bedrock")
     monkeypatch.setattr(BedrockStructuredLLM, "_get_client", lambda self: client)
-    app = create_app()
+    app = create_app(clock=lambda: datetime.fromisoformat("2026-09-04T09:00:00+08:00"))
     assert client.requests == []
 
     async def run():

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
@@ -95,7 +95,7 @@ function calendarId() {
 
 function apiErrorMessage(reason: unknown) {
   if (reason instanceof ApiError) return `${reason.message} (${reason.code})`;
-  return "The API could not be reached. Your existing plan has not been replaced.";
+  return "The API could not be reached. The change may have been saved; retry to check its status.";
 }
 
 type OperationState = "idle" | "loading" | "success" | "error" | "refresh_error";
@@ -140,7 +140,7 @@ export default function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [planState, setPlanState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [planState, setPlanState] = useState<OperationState>("idle");
   const [planError, setPlanError] = useState<string | null>(null);
   const [planResult, setPlanResult] = useState<SchedulingResult | null>(null);
   const [changeSummary, setChangeSummary] = useState<string | null>(null);
@@ -153,6 +153,10 @@ export default function App() {
     before: ScheduledTask[];
     trigger: string;
   } | null>(null);
+  const [pendingPlanRefresh, setPendingPlanRefresh] = useState<{
+    result: SchedulingResult;
+    before: ScheduledTask[];
+  } | null>(null);
   const [pendingAction, setPendingAction] = useState<{
     request: PlanningEvent | CalendarChangeRequest;
     trigger: string;
@@ -163,6 +167,8 @@ export default function App() {
   const [calendarStart, setCalendarStart] = useState("");
   const [calendarEnd, setCalendarEnd] = useState("");
   const [calendarFlexibility, setCalendarFlexibility] = useState<"hard" | "soft" | "flexible">("hard");
+  // React state updates are asynchronous; the ref also blocks same-tick submissions.
+  const actionInFlight = useRef(false);
   const now = useMemo(() => new Date(), []);
 
   const load = useCallback(() => {
@@ -203,6 +209,8 @@ export default function App() {
     [data],
   );
   const operationLoading = operationState === "loading";
+  const isBusy = loading || planState === "loading" || operationLoading;
+  const writesDisabled = isBusy || Boolean(error) || Boolean(pendingRefresh) || Boolean(pendingPlanRefresh);
 
   const applyPlanningResult = useCallback(async (
     result: SchedulingResult,
@@ -244,7 +252,8 @@ export default function App() {
     request: PlanningEvent | CalendarChangeRequest,
     trigger: string,
   ) => {
-    if (!data || operationLoading) return;
+    if (!data || writesDisabled || actionInFlight.current) return;
+    actionInFlight.current = true;
 
     const before = data.schedule;
     const controller = new AbortController();
@@ -254,6 +263,9 @@ export default function App() {
     setPendingAction({ request, trigger, before });
     setOperationResult(null);
     setScheduleChanges(null);
+    setPlanResult(null);
+    setPlanState("idle");
+    setChangeSummary(null);
 
     try {
       const result = "calendar_block" in request
@@ -264,11 +276,25 @@ export default function App() {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
       setOperationMessage(apiErrorMessage(reason));
       setOperationState("error");
+    } finally {
+      actionInFlight.current = false;
     }
-  }, [applyPlanningResult, data, operationLoading]);
+  }, [applyPlanningResult, data, writesDisabled]);
+
+  const retryPendingRefresh = useCallback(async () => {
+    if (!pendingRefresh || isBusy || actionInFlight.current) return;
+    actionInFlight.current = true;
+    setOperationState("loading");
+    try {
+      await applyPlanningResult(pendingRefresh.result, pendingRefresh.before, pendingRefresh.trigger);
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyPlanningResult, isBusy, pendingRefresh]);
 
   const retryPendingAction = useCallback(async () => {
-    if (!pendingAction || operationLoading) return;
+    if (!pendingAction || writesDisabled || actionInFlight.current) return;
+    actionInFlight.current = true;
     const controller = new AbortController();
     const submittedEvent = "calendar_block" in pendingAction.request
       ? pendingAction.request.event
@@ -280,8 +306,10 @@ export default function App() {
       const refreshed = await getDashboardData(controller.signal);
       const alreadySaved = refreshed.planningEvents.some((event) => event.id === submittedEvent.id);
       if (!alreadySaved) {
-        setOperationState("idle");
-        await submitPlanningAction(pendingAction.request, pendingAction.trigger);
+        const result = "calendar_block" in pendingAction.request
+          ? await changeCalendar(pendingAction.request, controller.signal)
+          : await replan(pendingAction.request, controller.signal);
+        await applyPlanningResult(result, pendingAction.before, pendingAction.trigger);
         return;
       }
 
@@ -302,10 +330,12 @@ export default function App() {
       setOperationState("success");
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setOperationMessage("Could not verify the previous submission. Nothing was submitted again; retry this check safely.");
+      setOperationMessage("Could not finish recovering the previous action. Retry to check its original event before submitting again.");
       setOperationState("error");
+    } finally {
+      actionInFlight.current = false;
     }
-  }, [operationLoading, pendingAction, submitPlanningAction]);
+  }, [applyPlanningResult, pendingAction, writesDisabled]);
 
   const handleTaskAction = useCallback((task: Task, action: "task_completed" | "task_missed") => {
     const event: PlanningEvent = {
@@ -365,42 +395,67 @@ export default function App() {
     void submitPlanningAction(change, `${calendarTitle.trim()} changed the calendar`);
   }, [calendarEnd, calendarFlexibility, calendarSelection, calendarStart, calendarTitle, submitPlanningAction]);
 
-  const handleGeneratePlan = useCallback(async () => {
-    const controller = new AbortController();
-    const previousSchedule = new Map(
-      (data?.schedule ?? []).map((task) => [task.task_id, task]),
-    );
+  const applyGeneratedPlan = useCallback(async (result: SchedulingResult, before: ScheduledTask[]) => {
+    try {
+      const controller = new AbortController();
+      const refreshed = await getDashboardData(controller.signal);
+      const comparison = compareSchedules(before, refreshed.schedule);
 
+      setData(refreshed);
+      setPlanResult(result);
+      setChangeSummary(
+        `${refreshed.schedule.length} scheduled · ${comparison.added.length} added · ${comparison.moved.length} moved · ${comparison.removed.length} removed`,
+      );
+      setPendingPlanRefresh(null);
+      setPlanState("success");
+    } catch {
+      setPendingPlanRefresh({ result, before });
+      setPlanError("The new plan was saved, but the dashboard could not be refreshed. Retry refresh to load it without generating again.");
+      setPlanState("refresh_error");
+    }
+  }, []);
+
+  const retryPlanRefresh = useCallback(async () => {
+    if (!pendingPlanRefresh || isBusy || actionInFlight.current) return;
+    actionInFlight.current = true;
+    setPlanState("loading");
+    try {
+      await applyGeneratedPlan(pendingPlanRefresh.result, pendingPlanRefresh.before);
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyGeneratedPlan, isBusy, pendingPlanRefresh]);
+
+  const handleGeneratePlan = useCallback(async () => {
+    if (!data || writesDisabled || actionInFlight.current) return;
+    if ((data.tasks.length > 0 || data.schedule.length > 0) && !window.confirm(
+      "Regenerate plan? This will replace your tasks and schedule and reset task progress, including completed work.",
+    )) return;
+    actionInFlight.current = true;
+    const controller = new AbortController();
     setPlanState("loading");
     setPlanError(null);
     setChangeSummary(null);
 
     try {
       const result = await generatePlan(controller.signal);
-      const refreshed = await getDashboardData(controller.signal);
-      const latestSchedule = new Map(
-        refreshed.schedule.map((task) => [task.task_id, task]),
-      );
-      const added = refreshed.schedule.filter((task) => !previousSchedule.has(task.task_id)).length;
-      const moved = refreshed.schedule.filter((task) => {
-        const previous = previousSchedule.get(task.task_id);
-        return previous
-          && (previous.start_time !== task.start_time || previous.end_time !== task.end_time);
-      }).length;
-      const removed = [...previousSchedule.keys()].filter((taskId) => !latestSchedule.has(taskId)).length;
-
-      setData(refreshed);
-      setPlanResult(result);
-      setChangeSummary(
-        `${refreshed.schedule.length} scheduled · ${added} added · ${moved} moved · ${removed} removed`,
-      );
-      setPlanState("success");
+      // Results and recovery actions from the old plan no longer apply.
+      setPlanResult(null);
+      setOperationState("idle");
+      setOperationMessage(null);
+      setOperationResult(null);
+      setScheduleChanges(null);
+      setPendingAction(null);
+      setPendingRefresh(null);
+      await applyGeneratedPlan(result, data.schedule);
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setPlanError("StudyFlow couldn’t generate and refresh the plan. Check the API, then retry.");
+      setPlanError("StudyFlow couldn’t confirm that the plan was generated. Check the API before retrying; another generation will reset task progress.");
       setPlanState("error");
+    } finally {
+      actionInFlight.current = false;
     }
-  }, [data]);
+  }, [applyGeneratedPlan, data, writesDisabled]);
 
   return (
     <div className="app-shell">
@@ -428,32 +483,35 @@ export default function App() {
               className="generate-button"
               type="button"
               onClick={handleGeneratePlan}
-              disabled={planState === "loading" || loading || Boolean(error)}
+              disabled={writesDisabled}
             >
               {planState === "loading" ? <RefreshCw className="spin" size={16} /> : <WandSparkles size={16} />}
-              {planState === "loading" ? "Generating…" : planState === "success" ? "Generate again" : "Generate Plan"}
+              {planState === "loading" ? (pendingPlanRefresh ? "Refreshing…" : "Generating…") : data && (data.tasks.length > 0 || data.schedule.length > 0) ? "Regenerate Plan" : "Generate Plan"}
             </button>
           </div>
         </div>
 
         <section className={`change-notice ${planState}`} aria-live="polite">
           <span className="change-notice-icon">
-            {planState === "error" ? <TriangleAlert size={18} /> : planState === "loading" ? <RefreshCw className="spin" size={18} /> : <RotateCcw size={18} />}
+            {planState === "error" || planState === "refresh_error" ? <TriangleAlert size={18} /> : planState === "loading" ? <RefreshCw className="spin" size={18} /> : <RotateCcw size={18} />}
           </span>
           <div>
-            <strong>{planState === "success" ? "Plan updated" : planState === "error" ? "Plan update failed" : planState === "loading" ? "Agent is generating your plan" : "Plan changes"}</strong>
+            <strong>{planState === "success" ? "Plan updated" : planState === "refresh_error" ? "Plan saved — refresh needed" : planState === "error" ? "Plan update failed" : planState === "loading" ? (pendingPlanRefresh ? "Refreshing saved plan" : "Agent is generating your plan") : "Plan changes"}</strong>
             <p>
               {planState === "success" && changeSummary
                 ? changeSummary
-                : planState === "error"
+                : planState === "error" || planState === "refresh_error"
                   ? planError
                   : planState === "loading"
-                    ? "Tasks, dependencies, and available time are being evaluated."
+                    ? (pendingPlanRefresh ? "Loading the saved tasks and schedule." : "Tasks, dependencies, and available time are being evaluated.")
                     : "Generate a plan to see scheduled, moved, and unscheduled work here."}
             </p>
           </div>
           {planState === "error" && (
-            <button type="button" onClick={handleGeneratePlan}><RefreshCw size={14} /> Retry</button>
+            <button type="button" onClick={handleGeneratePlan} disabled={writesDisabled}><RefreshCw size={14} /> Retry</button>
+          )}
+          {planState === "refresh_error" && pendingPlanRefresh && (
+            <button type="button" onClick={() => void retryPlanRefresh()} disabled={isBusy}><RefreshCw size={14} /> Retry refresh</button>
           )}
         </section>
 
@@ -468,12 +526,12 @@ export default function App() {
                 <p>{operationMessage ?? "Complete, miss, or change a calendar block to see exactly what moves."}</p>
               </div>
               {operationState === "refresh_error" && pendingRefresh && (
-                <button type="button" onClick={() => void applyPlanningResult(pendingRefresh.result, pendingRefresh.before, pendingRefresh.trigger)}>
+                <button type="button" onClick={() => void retryPendingRefresh()} disabled={isBusy}>
                   <RefreshCw size={14} /> Retry refresh
                 </button>
               )}
               {operationState === "error" && pendingAction && (
-                <button type="button" onClick={() => void retryPendingAction()}>
+                <button type="button" onClick={() => void retryPendingAction()} disabled={writesDisabled}>
                   <RefreshCw size={14} /> Retry action
                 </button>
               )}
@@ -527,23 +585,23 @@ export default function App() {
             <summary><CalendarPlus size={17} /> Add or edit calendar block</summary>
             <div className="calendar-editor">
               <form onSubmit={handleCalendarSubmit}>
-                <label>Calendar entry<select value={calendarSelection} onChange={(event) => handleCalendarSelection(event.target.value)} disabled={operationLoading}>
+                <label>Calendar entry<select value={calendarSelection} onChange={(event) => handleCalendarSelection(event.target.value)} disabled={writesDisabled}>
                   <option value="new">New calendar block</option>
                   {data.calendarBlocks.map((block) => <option key={block.id} value={block.id}>{block.title}</option>)}
                 </select></label>
-                <label>Title<input required value={calendarTitle} onChange={(event) => setCalendarTitle(event.target.value)} placeholder="Extra lecture" disabled={operationLoading} /></label>
+                <label>Title<input required value={calendarTitle} onChange={(event) => setCalendarTitle(event.target.value)} placeholder="Extra lecture" disabled={writesDisabled} /></label>
                 <div className="calendar-time-fields">
-                  <label>Starts<input required type="datetime-local" value={calendarStart} onChange={(event) => setCalendarStart(event.target.value)} disabled={operationLoading} /></label>
-                  <label>Ends<input required type="datetime-local" value={calendarEnd} onChange={(event) => setCalendarEnd(event.target.value)} disabled={operationLoading} /></label>
+                  <label>Starts<input required type="datetime-local" value={calendarStart} onChange={(event) => setCalendarStart(event.target.value)} disabled={writesDisabled} /></label>
+                  <label>Ends<input required type="datetime-local" value={calendarEnd} onChange={(event) => setCalendarEnd(event.target.value)} disabled={writesDisabled} /></label>
                 </div>
-                <label>Flexibility<select value={calendarFlexibility} onChange={(event) => setCalendarFlexibility(event.target.value as "hard" | "soft" | "flexible")} disabled={operationLoading}>
+                <label>Flexibility<select value={calendarFlexibility} onChange={(event) => setCalendarFlexibility(event.target.value as "hard" | "soft" | "flexible")} disabled={writesDisabled}>
                   <option value="hard">Hard — cannot move</option><option value="soft">Soft</option><option value="flexible">Flexible</option>
                 </select></label>
-                <button className="calendar-submit" type="submit" disabled={operationLoading || !calendarTitle.trim() || !calendarStart || !calendarEnd}>
+                <button className="calendar-submit" type="submit" disabled={writesDisabled || !calendarTitle.trim() || !calendarStart || !calendarEnd}>
                   {operationLoading ? <RefreshCw className="spin" size={15} /> : <CalendarPlus size={15} />}{calendarSelection === "new" ? "Add & replan" : "Update & replan"}
                 </button>
               </form>
-              <div className="calendar-list"><strong>Current calendar</strong>{data.calendarBlocks.map((block) => <button type="button" key={block.id} onClick={() => handleCalendarSelection(block.id)}><span>{block.title}</span><small>{formatScheduleDateTime(block.start_time)} · {block.flexibility}</small></button>)}</div>
+              <div className="calendar-list"><strong>Current calendar</strong>{data.calendarBlocks.map((block) => <button type="button" key={block.id} onClick={() => handleCalendarSelection(block.id)} disabled={writesDisabled}><span>{block.title}</span><small>{formatScheduleDateTime(block.start_time)} · {block.flexibility}</small></button>)}</div>
             </div>
           </details>
         )}
@@ -626,8 +684,8 @@ export default function App() {
                     <article key={task.id}>
                       <div><strong>{task.name}</strong><span className={`task-status ${task.status}`}>{task.status.replaceAll("_", " ")}</span></div>
                       <div className="task-buttons">
-                        <button type="button" onClick={() => handleTaskAction(task, "task_completed")} disabled={operationLoading || task.status === "completed"}><CheckCircle2 size={13} /> Complete</button>
-                        <button className="missed" type="button" onClick={() => handleTaskAction(task, "task_missed")} disabled={operationLoading || task.status === "completed" || task.status === "missed"}><XCircle size={13} /> Missed</button>
+                        <button type="button" onClick={() => handleTaskAction(task, "task_completed")} disabled={writesDisabled || task.status === "completed"}><CheckCircle2 size={13} /> Complete</button>
+                        <button className="missed" type="button" onClick={() => handleTaskAction(task, "task_missed")} disabled={writesDisabled || task.status === "completed" || task.status === "missed"}><XCircle size={13} /> Missed</button>
                       </div>
                     </article>
                   ))}

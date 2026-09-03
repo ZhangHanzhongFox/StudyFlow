@@ -124,6 +124,14 @@ real `StudyFlowAgent` and `StudyScheduler` through `PlanningPipeline`.
 publishes both through the planning state. `GET /tasks` and `GET /schedule`
 therefore always reflect the latest successful run.
 
+The default runtime injects a Singapore-time clock into `StudyScheduler`.
+Each scheduling call reads it after decomposition and rounds up to a whole
+minute, so an old mock calendar or previous plan cannot place new work before
+the current time. It does not freeze the clock at application startup.
+Tests can supply `create_app(clock=...)`; an explicit scheduler `planning_start`
+takes precedence for fixed-date demos. Replan still uses the event timestamp
+and preserves completed work and unaffected valid placements.
+
 Canvas and Google Calendar-shaped mocks are normalized at
 `backend/integrations/` and can populate the same canonical demo state without
 changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
