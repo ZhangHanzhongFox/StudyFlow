@@ -21,7 +21,7 @@
 
 | 成员 | 已提供的基线 | 明天应核对/继续完成 |
 |---|---|---|
-| A | `find_affected_task_ids(event, tasks)`；输入已应用状态变化；missed 排除已完成任务，包含未完成下游 | 核对复杂依赖下的影响范围；calendar 返回所有未完成任务是候选集合，不代表全部要移动 |
+| A | `find_affected_task_ids(event, tasks)`；输入已应用状态变化；missed 排除已完成任务，包含未完成下游 | 已补齐复杂图回归和真实调用链测试，见下方 A 验收；calendar 仍返回未完成候选集合 |
 | B | `reschedule_tasks(..., *, replanning_start=None, preserve_valid_affected=False)` | 核对重排结果和更多冲突边界；为 calendar 保留有效候选排期，必要时扩展依赖影响 |
 | C | `PlanningState.replan()`；两个写接口共用事务；请求 schema 与错误响应 | 核对 API 和状态一致性；维持完整测试通过 |
 | D | `replan()`、`changeCalendar()`、`compareSchedules()`、`ApiError`、包含日历的 `getDashboardData()` | 接完成/错过按钮、日历输入、重排前后对比与错误/未排期展示 |
@@ -89,6 +89,79 @@ API 使用 `PlanningState.replan()` 自动完成这个步骤。
 
 该测试还覆盖 completed、UTC 等价时间、重复事件、请求错误、日历覆盖完成历史、
 无空档、更新已有日历块以及重排异常回滚。
+
+## A：复杂依赖影响范围验收
+
+本次保留现有分析算法和 `find_affected_task_ids(event, tasks) -> set[str]`
+接口，补充测试与原因说明；不增加运行时解释字段，不修改 B/C/D 的接口或共同验收 JSON。
+下面的独立测试样例定义在 [test_replan_impact.py](../tests/test_replan_impact.py)，
+全部使用 canonical models，不与上面的共同演示任务 ID 混用。
+
+### 分叉、汇合与三层下游
+
+箭头表示「前置任务 → 依赖它的任务」。除 `other` 属于另一 assessment 外，
+其余任务都属于 `assessment-main`；`root` 已完成。
+
+```text
+root (completed) ──→ trigger ──→ left ──┐
+       │                 └────→ right ─┼──→ join ──→ tail
+       └──→ sibling         co-parent ─┘
+
+independent                 other (另一 assessment)
+```
+
+在 `2026-09-03T10:30:00+08:00` 对 `trigger` 产生 `task_missed`，
+并在调用 A 前将它的状态更新为 `missed`。预期集合精确为
+`{trigger, left, right, join, tail}`。
+
+| 任务 | 结果 | 原因 / 依赖路径 |
+|---|---|---|
+| `trigger` | 纳入 | missed 事件直接引用的未完成任务 |
+| `left`、`right` | 纳入 | 分别直接依赖 `trigger` |
+| `join` | 纳入一次 | 经 `trigger → left → join` 和 `trigger → right → join` 可达 |
+| `tail` | 纳入 | 经 `trigger → left/right → join → tail` 到达第三层下游 |
+| `root` | 排除 | 已完成，且属于上游 |
+| `co-parent` | 排除 | 虽然也是 `join` 的前置任务，但不是 `trigger` 的下游；影响不反向传播 |
+| `sibling` | 排除 | 与 `trigger` 共享祖先，不依赖 `trigger` |
+| `independent`、`other` | 排除 | 与 `trigger` 无依赖路径，不因属于同一或另一 assessment 被纳入 |
+
+同样的图若对 `trigger` 产生 `task_completed`，先将它更新为 completed，
+预期为 `{left, right, join, tail}`。测试同时覆盖 pending、scheduled、
+in_progress、missed 的下游、正反输入顺序、重复调用，以及输入任务和事件不被修改。
+
+### completed 与叶子边界
+
+在基础图上追加 `trigger → done-leaf (completed)` 和
+`trigger → done-bridge (completed) → after-bridge (pending)`：
+
+- `done-leaf` 和 `done-bridge` 均排除；`after-bridge` 因依赖路径可达而纳入。
+- missed 集合为 `{trigger, left, right, join, tail, after-bridge}`；
+  completed 集合为 `{left, right, join, tail, after-bridge}`。
+- 这是 A 的图分析边界用例：信任传入的完成状态，先遍历下游，再排除 completed。
+  completed 不会截断遍历；此样例不表示正常的按依赖顺序执行历史。
+- 在基础图中将叶子 `tail` 标记 missed，只返回 `{tail}`；标记 completed，返回空集合。
+
+### 真实调用链与复验
+
+集成测试从基础图开始，`root` completed、其他任务 scheduled，任务各 30 分钟，
+deadline 为当天 18:00。初始排期为 root 08:00、co-parent 08:30、trigger 09:00、
+left 09:30、right 10:00、join 11:00、tail 11:30、sibling 15:00、
+independent 15:30、other 16:00；保留 10:30–11:00 的 hard 课程。
+
+一次 `POST /replan` 经真实 State、Agent、Pipeline 和 Scheduler，测试记录器只观察
+并透传调用：确认 A 收到已应用的 missed 状态，B 收到精确候选集合，事件时钟正确传入。
+在这个固定场景里，上述五个候选任务全部移动；root、co-parent、sibling、independent、
+other 保持原排期，root 仍 completed。新排期满足事件时间、依赖、deadline 和 hard
+约束，完整结果写回状态，事件只保存一次。
+
+A 的返回值是「需要重新评估的候选集合」，不等于所有场景中的实际移动集合。
+尤其 calendar 仍返回全部未完成任务，B 通过 `preserve_valid_affected=True`
+保留有效排期，并按实际冲突扩展必要的依赖影响。
+
+```bash
+.venv/bin/python -m pytest tests/test_replan_impact.py tests/test_agent_workflow.py tests/test_replan_acceptance.py -q
+.venv/bin/python -m pytest -q
+```
 
 ## D 的调用顺序
 

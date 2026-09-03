@@ -95,3 +95,42 @@ update the referenced task state in the same in-memory transaction.
 This state is intentionally process-local for the hackathon. It can later be
 replaced with persistent storage without changing the canonical schemas or the
 Agent/Scheduler contracts.
+
+## Amazon Bedrock
+
+`backend.agents.bedrock.BedrockStructuredLLM` implements the existing
+`StructuredLLM` protocol using `boto3` and the Bedrock Converse API. The default
+model is `amazon.nova-lite-v1:0` in `us-east-1`, matching the initial successful
+local connection. `STUDYFLOW_LLM_PROVIDER=bedrock` enables injection into the
+default app; `none` (the default) keeps the deterministic runtime. Invalid
+provider or token-limit settings fail at startup instead of silently disabling
+the LLM. Explicitly injected pipelines and stores retain their existing behavior.
+
+The adapter forces one `submit_assessment_result` tool call whose input schema
+comes from `ClassificationOutput` or `DecompositionOutput`. The tool is only a
+structured-result envelope; no model-generated tool is executed. Local schema
+references are expanded and the root schema contains only `type`, `properties`
+and `required`, as required by Nova. The original Pydantic validation remains
+authoritative, followed by the agent's canonical Task conversion and graph
+validation. A truncated or filtered response never enters a plan as partial
+tasks. Ordinary text responses are also rejected. Prompts distinguish assessment
+delivery time from the student's preparation effort; these estimates are not
+guaranteed accurate by schema validation.
+
+The client resolves credentials lazily using boto3, including the portal's
+access key, secret key and session token. Importing or starting the API makes
+no inference request. Connection/read timeouts are 5/45 seconds, with two total
+SDK attempts per call; there is no additional application retry loop. Provider
+and validation failures use the existing deterministic fallback. Logs include
+model/schema and token counts on validated output (INFO), and exception type
+on fallback (WARNING); they do not include credentials or assessment bodies.
+
+The standalone `python -m backend.agents.check_bedrock` command makes a single
+structured-output request and fails visibly instead of falling back. See the
+[README](../README.md#connect-amazon-bedrock-nova-lite) for the same-terminal
+credential setup and startup sequence. Tests mock Converse and make no paid
+requests. Shared schemas, fixtures, scheduling and replanning rules are unchanged.
+
+AWS references:
+- [Nova tool schema and tool choice](https://docs.aws.amazon.com/nova/latest/userguide/tool-use-definition.html)
+- [Converse with Nova](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_Converse_AmazonNovaText_section.html)
