@@ -61,6 +61,7 @@ def validate_planning_state(
     blocks_by_id = _unique_by_id(block_list, "calendar block")
     _unique_by_id(schedule_list, "scheduled task")
     _unique_by_id(event_list, "planning event")
+    scheduled_task_ids: set[str] = set()
     for task in task_list:
         if task.assessment_id not in assessments_by_id:
             raise PlanningStateValidationError(
@@ -76,6 +77,11 @@ def validate_planning_state(
                 f"scheduled task {placement.id} references unknown task "
                 f"{placement.task_id}"
             )
+        if placement.task_id in scheduled_task_ids:
+            raise PlanningStateValidationError(
+                f"task {placement.task_id} has multiple scheduled placements"
+            )
+        scheduled_task_ids.add(placement.task_id)
 
     reference_ids_by_type = {
         PlanningEventType.TASK_COMPLETED: set(tasks_by_id),
@@ -204,6 +210,35 @@ class PlanningState:
             for task in tasks
         ]
 
+    @staticmethod
+    def _validate_replanning_result(
+        tasks: Iterable[Task],
+        result: "SchedulingResult",
+    ) -> None:
+        """Reject incomplete or contradictory scheduler output before commit."""
+
+        task_list = list(tasks)
+        task_ids = {task.id for task in task_list}
+        completed_ids = {
+            task.id for task in task_list if task.status is TaskStatus.COMPLETED
+        }
+        scheduled_ids = {item.task_id for item in result.scheduled_tasks}
+        failure_ids = [item.task_id for item in result.unscheduled_tasks]
+        failure_id_set = set(failure_ids)
+        if (not failure_id_set <= task_ids
+                or failure_id_set & scheduled_ids
+                or failure_id_set & completed_ids
+                or len(failure_ids) != len(failure_id_set)):
+            raise PlanningStateValidationError(
+                "invalid unscheduled task references"
+            )
+        omitted_ids = task_ids - completed_ids - scheduled_ids - failure_id_set
+        if omitted_ids:
+            raise PlanningStateValidationError(
+                "scheduler result omitted active tasks: "
+                + ", ".join(sorted(omitted_ids))
+            )
+
     def add_planning_event(self, event: PlanningEvent) -> PlanningEvent:
         with self._lock:
             self.validate_planning_event(event)
@@ -246,18 +281,12 @@ class PlanningState:
                 event.model_copy(deep=True), self.list_assessments(), tasks,
                 blocks, self.list_scheduled_tasks(),
             )
+            self._validate_replanning_result(tasks, result)
             tasks = self._apply_schedule_status(tasks, result.scheduled_tasks)
             validate_planning_state(
                 self._assessments, tasks, blocks,
                 result.scheduled_tasks, [*self._planning_events, event],
             )
-            task_ids = {task.id for task in tasks}
-            scheduled_ids = {item.task_id for item in result.scheduled_tasks}
-            failure_ids = [item.task_id for item in result.unscheduled_tasks]
-            if (not set(failure_ids) <= task_ids
-                    or set(failure_ids) & scheduled_ids
-                    or len(failure_ids) != len(set(failure_ids))):
-                raise PlanningStateValidationError("invalid unscheduled task references")
             self._tasks = self._copies(tasks)
             self._calendar_blocks = self._copies(blocks)
             self._scheduled_tasks = self._copies(result.scheduled_tasks)

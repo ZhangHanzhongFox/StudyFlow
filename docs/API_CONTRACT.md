@@ -177,6 +177,9 @@ Both endpoints return the existing `SchedulingResult` shape:
 - `unscheduled_tasks` describes placement failures found in this run. A lack of
   available time is a normal 200 result: save the valid partial schedule,
   calendar changes, task states, and event together.
+- Every non-completed task must appear exactly once in either the complete
+  schedule or `unscheduled_tasks`. Duplicate placements, contradictory entries,
+  and silently omitted active tasks are rejected as an invalid planning state.
 - Invalid input (422), duplicate event IDs (409), or runtime failures (500)
   leave all four collections unchanged. Duplicate IDs are rejected, not
   automatically replayed. After an uncertain network failure, refresh state
