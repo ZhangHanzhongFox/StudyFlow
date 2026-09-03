@@ -11,7 +11,13 @@ from fastapi import FastAPI
 
 from backend.agents import StudyFlowAgent
 from backend.main import create_app
-from backend.scheduler import Scheduler, SchedulingResult, StudyScheduler
+from backend.scheduler import (
+    Scheduler,
+    SchedulingFailureReason,
+    SchedulingResult,
+    StudyScheduler,
+    UnscheduledTask,
+)
 from backend.schemas import Assessment, CalendarBlock, Flexibility, ScheduledTask, Task
 from backend.services import PlanningPipeline, PlanningState
 from tests.test_default_runtime import request
@@ -132,6 +138,43 @@ def test_runtime_failure_rolls_back_every_collection(event_type: str) -> None:
     response = request(app, "POST", scenario["endpoint"], json=scenario["request"])
     assert response.status_code == 500
     assert response.json()["detail"]["code"] == "replanning_failed"
+    assert snapshot(app) == before
+
+
+@pytest.mark.parametrize("invalid_result", ["omitted", "duplicate", "completed_failure"])
+def test_invalid_scheduler_result_rolls_back_every_collection(
+    invalid_result: str,
+) -> None:
+    class InvalidScheduler(StudyScheduler):
+        def reschedule_tasks(
+            self, assessments: list[Assessment], tasks: list[Task],
+            blocks: list[CalendarBlock], schedule: list[ScheduledTask],
+            affected: set[str], **kwargs: Any,
+        ) -> SchedulingResult:
+            if invalid_result == "omitted":
+                return SchedulingResult(scheduled_tasks=schedule[:-1])
+            if invalid_result == "duplicate":
+                duplicate = schedule[0].model_copy(update={"id": "schedule-duplicate"})
+                return SchedulingResult(scheduled_tasks=[*schedule, duplicate])
+            return SchedulingResult(
+                scheduled_tasks=schedule,
+                unscheduled_tasks=[UnscheduledTask(
+                    task_id="task-research",
+                    reason=SchedulingFailureReason.INVALID_INPUT,
+                    message="completed work cannot be unscheduled",
+                )],
+            )
+
+    app, _ = setup(InvalidScheduler())
+    before = snapshot(app)
+    response = request(
+        app,
+        "POST",
+        "/replan",
+        json=FIXTURE["scenarios"]["missed"]["request"],
+    )
+    assert response.status_code == 500
+    assert response.json()["detail"]["code"] == "invalid_planning_state"
     assert snapshot(app) == before
 
 
