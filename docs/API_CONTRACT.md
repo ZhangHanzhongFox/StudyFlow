@@ -158,6 +158,12 @@ immutable. A change that would overlap them is rejected with 422
 Likewise, a missed task with a hard placement cannot be moved automatically;
 the request is rejected rather than falsely reporting a successful recovery.
 
+A preserved future hard task may depend on a task that needs to move. The
+scheduler keeps the hard placement and first attempts to place its prerequisite
+before it. If no result can satisfy that dependency order, replanning is
+rejected with 422 `invalid_replanning_input`; the backend never commits a
+schedule in which a fixed task starts before an incomplete prerequisite ends.
+
 A bare `calendar_changed` event sent to `/replan` only re-evaluates the existing
 calendar; it cannot convey a new block or new times. Use `/calendar-changes`
 for user edits.

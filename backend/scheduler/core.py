@@ -204,9 +204,12 @@ class StudyScheduler:
                 for dependency_id in task.dependencies
             )
             if invalid_dependency and task.status is not TaskStatus.COMPLETED:
-                if task.id in immutable_ids:
-                    raise ValueError(f"Replanning would invalidate hard task: {task.id}")
-                target_task_ids.add(task.id)
+                # A hard dependent may remain valid when its prerequisite can
+                # be moved into an earlier slot. Keep that fixed placement as
+                # a constraint and validate the resulting dependency order
+                # after scheduling instead of rejecting the replan eagerly.
+                if task.id not in immutable_ids:
+                    target_task_ids.add(task.id)
 
         preserve_task_ids = tasks_by_id.keys() - target_task_ids
         preserved = self._preserve_existing(
@@ -221,14 +224,25 @@ class StudyScheduler:
                 for other in preserved[:index]
             ):
                 raise ValueError("preserved schedule contains overlapping tasks")
-        return self._schedule_selected(
+        dependency_deadlines = self._fixed_dependency_deadlines(
+            task_list,
+            existing_list,
+            target_task_ids,
+        )
+        result = self._schedule_selected(
             task_list,
             assessments_by_id,
             block_list,
             planning_start,
             target_task_ids,
             preserved,
+            dependency_deadlines,
         )
+        self._validate_scheduled_dependencies(
+            result.scheduled_tasks,
+            tasks_by_id,
+        )
+        return result
 
     def schedule(
         self,
@@ -278,6 +292,7 @@ class StudyScheduler:
         planning_start: datetime,
         target_task_ids: set[str],
         preserved: list[ScheduledTask],
+        dependency_deadlines: Mapping[str, datetime] | None = None,
     ) -> SchedulingResult:
         planning_timezone = planning_start.tzinfo or timezone.utc
         busy_intervals = self._hard_busy_intervals(
@@ -311,7 +326,18 @@ class StudyScheduler:
             self.daily_end_hour - self.daily_start_hour
         ) * 60
 
-        for task in self._topological_sort(tasks):
+        ordering_deadlines = {
+            task.id: min(
+                assessments_by_id[task.assessment_id].deadline,
+                dependency_deadlines.get(
+                    task.id,
+                    assessments_by_id[task.assessment_id].deadline,
+                ),
+            )
+            for task in tasks
+        } if dependency_deadlines else None
+
+        for task in self._topological_sort(tasks, ordering_deadlines):
             if task.id not in target_task_ids:
                 continue
 
@@ -338,6 +364,11 @@ class StudyScheduler:
 
             assessment = assessments_by_id[task.assessment_id]
             deadline = assessment.deadline.astimezone(planning_timezone)
+            if dependency_deadlines and task.id in dependency_deadlines:
+                deadline = min(
+                    deadline,
+                    dependency_deadlines[task.id].astimezone(planning_timezone),
+                )
             unlock_at = (
                 assessment.unlock_at.astimezone(planning_timezone)
                 if assessment.unlock_at is not None
@@ -501,8 +532,71 @@ class StudyScheduler:
         )
 
     @staticmethod
-    def _topological_sort(tasks: Sequence[Task]) -> list[Task]:
-        """Kahn-sort tasks, prioritizing ready tasks by descending priority."""
+    def _validate_scheduled_dependencies(
+        schedule: Sequence[ScheduledTask],
+        tasks_by_id: Mapping[str, Task],
+    ) -> None:
+        """Reject a result that would make a preserved fixed task invalid."""
+
+        placements_by_task = {item.task_id: item for item in schedule}
+        for placement in schedule:
+            task = tasks_by_id[placement.task_id]
+            for dependency_id in task.dependencies:
+                dependency = tasks_by_id[dependency_id]
+                dependency_placement = placements_by_task.get(dependency_id)
+                if dependency_placement is None:
+                    if dependency.status is TaskStatus.COMPLETED:
+                        continue
+                    raise ValueError(
+                        "Replanning would leave scheduled task "
+                        f"{task.id} without prerequisite {dependency_id}"
+                    )
+                if dependency_placement.end_time > placement.start_time:
+                    raise ValueError(
+                        "Replanning would violate dependency order: "
+                        f"{dependency_id} must finish before {task.id}"
+                    )
+
+    @classmethod
+    def _fixed_dependency_deadlines(
+        cls,
+        tasks: Sequence[Task],
+        existing_schedule: Sequence[ScheduledTask],
+        target_task_ids: set[str],
+    ) -> dict[str, datetime]:
+        """Propagate fixed dependent start times back through moved work."""
+
+        tasks_by_id = {task.id: task for task in tasks}
+        deadlines: dict[str, datetime] = {}
+        for placement in existing_schedule:
+            if placement.flexibility is not Flexibility.HARD:
+                continue
+            task = tasks_by_id[placement.task_id]
+            for dependency_id in task.dependencies:
+                if dependency_id in target_task_ids:
+                    deadlines[dependency_id] = min(
+                        deadlines.get(dependency_id, placement.start_time),
+                        placement.start_time,
+                    )
+
+        for task in reversed(cls._topological_sort(tasks)):
+            deadline = deadlines.get(task.id)
+            if deadline is None:
+                continue
+            for dependency_id in task.dependencies:
+                if dependency_id in target_task_ids:
+                    deadlines[dependency_id] = min(
+                        deadlines.get(dependency_id, deadline),
+                        deadline,
+                    )
+        return deadlines
+
+    @staticmethod
+    def _topological_sort(
+        tasks: Sequence[Task],
+        ordering_deadlines: Mapping[str, datetime] | None = None,
+    ) -> list[Task]:
+        """Kahn-sort by optional deadline, then descending task priority."""
 
         task_list = validate_task_graph(tasks)
         tasks_by_id = {task.id: task for task in task_list}
@@ -514,17 +608,23 @@ class StudyScheduler:
             for dependency_id in task.dependencies:
                 dependents[dependency_id].append(task.id)
 
-        ready: list[tuple[int, int, str]] = []
+        ready: list[tuple[float, int, int, str]] = []
         for task in task_list:
             if indegree[task.id] == 0:
                 heapq.heappush(
                     ready,
-                    (-task.priority, input_order[task.id], task.id),
+                    (
+                        ordering_deadlines[task.id].timestamp()
+                        if ordering_deadlines is not None else float("inf"),
+                        -task.priority,
+                        input_order[task.id],
+                        task.id,
+                    ),
                 )
 
         ordered: list[Task] = []
         while ready:
-            _, _, task_id = heapq.heappop(ready)
+            _, _, _, task_id = heapq.heappop(ready)
             ordered.append(tasks_by_id[task_id])
             for dependent_id in dependents[task_id]:
                 indegree[dependent_id] -= 1
@@ -533,6 +633,8 @@ class StudyScheduler:
                     heapq.heappush(
                         ready,
                         (
+                            ordering_deadlines[dependent_id].timestamp()
+                            if ordering_deadlines is not None else float("inf"),
                             -dependent.priority,
                             input_order[dependent_id],
                             dependent_id,
