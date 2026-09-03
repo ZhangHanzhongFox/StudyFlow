@@ -245,3 +245,295 @@ def test_reschedule_preserves_unaffected_placement() -> None:
     assert by_task_id["research"] == unaffected
     assert by_task_id["slides"].id == "scheduled-slides"
     assert by_task_id["slides"].start_time >= unaffected.end_time
+
+
+def test_reschedule_keeps_hard_dependent_when_prerequisite_can_move_before_it() -> None:
+    event_time = datetime(2026, 9, 3, 10, tzinfo=SGT)
+    tasks = [
+        make_task(
+            "prep",
+            duration_minutes=120,
+            priority=1,
+            status=TaskStatus.MISSED,
+        ),
+        make_task("unrelated", priority=10, status=TaskStatus.SCHEDULED),
+        make_task(
+            "fixed-demo",
+            dependencies=["prep"],
+            status=TaskStatus.SCHEDULED,
+        ),
+    ]
+    old_prep = ScheduledTask(
+        id="old-prep",
+        task_id="prep",
+        start_time=datetime(2026, 9, 3, 8, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        flexibility=Flexibility.FLEXIBLE,
+    )
+    old_unrelated = ScheduledTask(
+        id="old-unrelated",
+        task_id="unrelated",
+        start_time=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 10, tzinfo=SGT),
+        flexibility=Flexibility.FLEXIBLE,
+    )
+    fixed_demo = ScheduledTask(
+        id="fixed-demo-placement",
+        task_id="fixed-demo",
+        start_time=datetime(2026, 9, 3, 12, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 13, tzinfo=SGT),
+        flexibility=Flexibility.HARD,
+    )
+
+    result = make_scheduler().reschedule_tasks(
+        [make_assessment()],
+        tasks,
+        [],
+        [old_prep, old_unrelated, fixed_demo],
+        {"prep", "unrelated"},
+        replanning_start=event_time,
+    )
+
+    by_task_id = {item.task_id: item for item in result.scheduled_tasks}
+    assert by_task_id["prep"].start_time == event_time
+    assert by_task_id["prep"].end_time <= fixed_demo.start_time
+    assert by_task_id["fixed-demo"] == fixed_demo
+    assert by_task_id["unrelated"].start_time >= fixed_demo.end_time
+
+
+def test_reschedule_rejects_dependency_violation_against_hard_dependent() -> None:
+    tasks = [
+        make_task("prep", status=TaskStatus.MISSED),
+        make_task(
+            "fixed-demo",
+            dependencies=["prep"],
+            status=TaskStatus.SCHEDULED,
+        ),
+    ]
+    schedule = [
+        ScheduledTask(
+            id="old-prep",
+            task_id="prep",
+            start_time=datetime(2026, 9, 3, 8, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, 9, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        ),
+        ScheduledTask(
+            id="fixed-demo-placement",
+            task_id="fixed-demo",
+            start_time=datetime(2026, 9, 3, 12, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, 13, tzinfo=SGT),
+            flexibility=Flexibility.HARD,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="without prerequisite"):
+        make_scheduler().reschedule_tasks(
+            [make_assessment()],
+            tasks,
+            [],
+            schedule,
+            {"prep"},
+            replanning_start=datetime(2026, 9, 3, 11, 30, tzinfo=SGT),
+        )
+
+
+def test_reschedule_propagates_deep_dependencies_across_days() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 4, 12, tzinfo=SGT)
+    )
+    tasks = [
+        make_task("slides", status=TaskStatus.MISSED),
+        make_task(
+            "script",
+            dependencies=["slides"],
+            status=TaskStatus.SCHEDULED,
+        ),
+        make_task(
+            "rehearsal",
+            dependencies=["script"],
+            status=TaskStatus.SCHEDULED,
+        ),
+    ]
+    existing_schedule = [
+        ScheduledTask(
+            id=f"old-{task_id}",
+            task_id=task_id,
+            start_time=datetime(2026, 9, 3, hour, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, hour + 1, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        )
+        for task_id, hour in (("slides", 18), ("script", 19), ("rehearsal", 20))
+    ]
+    next_morning_class = CalendarBlock(
+        id="morning-class",
+        title="Morning class",
+        start_time=datetime(2026, 9, 4, 8, tzinfo=SGT),
+        end_time=datetime(2026, 9, 4, 9, tzinfo=SGT),
+        flexibility=Flexibility.HARD,
+    )
+    event_time = datetime(2026, 9, 3, 21, 30, tzinfo=SGT)
+
+    result = make_scheduler().reschedule_tasks(
+        [assessment],
+        tasks,
+        [next_morning_class],
+        existing_schedule,
+        {"slides"},
+        replanning_start=event_time,
+    )
+
+    by_task_id = {item.task_id: item for item in result.scheduled_tasks}
+    assert result.unscheduled_tasks == []
+    assert by_task_id["slides"].start_time == datetime(2026, 9, 4, 9, tzinfo=SGT)
+    assert by_task_id["script"].start_time == by_task_id["slides"].end_time
+    assert by_task_id["rehearsal"].start_time == by_task_id["script"].end_time
+    assert by_task_id["rehearsal"].end_time == assessment.deadline
+    assert all(item.start_time >= event_time for item in result.scheduled_tasks)
+
+
+def test_calendar_replan_moves_only_conflicts_and_required_dependents() -> None:
+    tasks = [
+        make_task("slides", status=TaskStatus.SCHEDULED),
+        make_task(
+            "script",
+            dependencies=["slides"],
+            status=TaskStatus.SCHEDULED,
+        ),
+        make_task("independent", status=TaskStatus.SCHEDULED),
+    ]
+    existing_schedule = [
+        ScheduledTask(
+            id=f"old-{task_id}",
+            task_id=task_id,
+            start_time=datetime(2026, 9, 3, hour, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, hour + 1, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        )
+        for task_id, hour in (("slides", 9), ("script", 10), ("independent", 15))
+    ]
+    new_class = CalendarBlock(
+        id="new-class",
+        title="New class",
+        start_time=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 10, tzinfo=SGT),
+        flexibility=Flexibility.HARD,
+    )
+
+    result = make_scheduler().reschedule_tasks(
+        [make_assessment()],
+        tasks,
+        [new_class],
+        existing_schedule,
+        {task.id for task in tasks},
+        replanning_start=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        preserve_valid_affected=True,
+    )
+
+    by_task_id = {item.task_id: item for item in result.scheduled_tasks}
+    assert by_task_id["slides"].start_time == new_class.end_time
+    assert by_task_id["script"].start_time == by_task_id["slides"].end_time
+    assert by_task_id["independent"] == existing_schedule[2]
+
+
+def test_consecutive_calendar_replans_use_the_latest_schedule() -> None:
+    tasks = [
+        make_task("slides", status=TaskStatus.SCHEDULED),
+        make_task(
+            "script",
+            dependencies=["slides"],
+            status=TaskStatus.SCHEDULED,
+        ),
+        make_task("independent", status=TaskStatus.SCHEDULED),
+    ]
+    initial_schedule = [
+        ScheduledTask(
+            id=f"old-{task_id}",
+            task_id=task_id,
+            start_time=datetime(2026, 9, 3, hour, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, hour + 1, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        )
+        for task_id, hour in (("slides", 9), ("script", 10), ("independent", 15))
+    ]
+    first_class = CalendarBlock(
+        id="class-1",
+        title="First class",
+        start_time=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 10, tzinfo=SGT),
+        flexibility=Flexibility.HARD,
+    )
+    scheduler = make_scheduler()
+    first = scheduler.reschedule_tasks(
+        [make_assessment()],
+        tasks,
+        [first_class],
+        initial_schedule,
+        {task.id for task in tasks},
+        replanning_start=datetime(2026, 9, 3, 9, tzinfo=SGT),
+        preserve_valid_affected=True,
+    )
+    second_class = CalendarBlock(
+        id="class-2",
+        title="Second class",
+        start_time=datetime(2026, 9, 3, 10, tzinfo=SGT),
+        end_time=datetime(2026, 9, 3, 11, tzinfo=SGT),
+        flexibility=Flexibility.HARD,
+    )
+
+    second = scheduler.reschedule_tasks(
+        [make_assessment()],
+        tasks,
+        [first_class, second_class],
+        first.scheduled_tasks,
+        {task.id for task in tasks},
+        replanning_start=datetime(2026, 9, 3, 9, 30, tzinfo=SGT),
+        preserve_valid_affected=True,
+    )
+
+    by_task_id = {item.task_id: item for item in second.scheduled_tasks}
+    assert by_task_id["slides"].start_time == second_class.end_time
+    assert by_task_id["script"].start_time == by_task_id["slides"].end_time
+    assert by_task_id["independent"] == initial_schedule[2]
+
+
+def test_replan_reports_deadline_and_dependency_failures_when_no_slot_remains() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 3, 12, tzinfo=SGT)
+    )
+    tasks = [
+        make_task("slides", status=TaskStatus.MISSED),
+        make_task("script", dependencies=["slides"], status=TaskStatus.SCHEDULED),
+    ]
+    existing_schedule = [
+        ScheduledTask(
+            id=f"old-{task_id}",
+            task_id=task_id,
+            start_time=datetime(2026, 9, 3, hour, tzinfo=SGT),
+            end_time=datetime(2026, 9, 3, hour + 1, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        )
+        for task_id, hour in (("slides", 8), ("script", 9))
+    ]
+    blocking_class = CalendarBlock(
+        id="blocking-class",
+        title="Blocking class",
+        start_time=datetime(2026, 9, 3, 10, tzinfo=SGT),
+        end_time=assessment.deadline,
+        flexibility=Flexibility.HARD,
+    )
+
+    result = make_scheduler().reschedule_tasks(
+        [assessment],
+        tasks,
+        [blocking_class],
+        existing_schedule,
+        {"slides"},
+        replanning_start=blocking_class.start_time,
+    )
+
+    assert result.scheduled_tasks == []
+    assert [item.reason for item in result.unscheduled_tasks] == [
+        SchedulingFailureReason.DEADLINE_CONSTRAINT,
+        SchedulingFailureReason.DEPENDENCY_CONFLICT,
+    ]

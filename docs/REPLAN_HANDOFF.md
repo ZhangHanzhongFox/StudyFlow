@@ -35,6 +35,21 @@ API 使用 `PlanningState.replan()` 自动完成这个步骤。
 时间统一为带时区的 ISO 8601。前端 `new Date().toISOString()` 的 UTC 时间可用；
 后端保持原排期时区的学习窗口。新安排不能早于事件时间，历史排期不会因时钟推进自动作废。
 
+### B 的专项边界
+
+`StudyScheduler` 会递归重排受影响任务的未完成下游，并把保留排期作为占用时段。
+若下游是未来的 `hard` 排期，调度器先尝试把受影响前置任务安排到它之前；只要依赖
+顺序仍成立，`hard` 排期保持原样。若没有可行顺序，则拒绝本次重排，不能提交一个
+前置任务缺失或晚于固定下游的结果。
+
+`tests/test_scheduler.py` 除初始排期外还覆盖：事件时间下限、跨日多层依赖、deadline
+与 hard block、日历变更时的最小移动、连续多次重排、固定下游，以及无空档的明确
+失败原因。可单独运行：
+
+```bash
+.venv/bin/python -m pytest tests/test_scheduler.py -q
+```
+
 ## 共同验收样例
 
 唯一输入文件：[replan_acceptance.json](../data/scenarios/replan_acceptance.json)。
