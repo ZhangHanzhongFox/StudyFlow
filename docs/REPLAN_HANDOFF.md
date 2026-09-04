@@ -27,8 +27,9 @@
 | D | `replan()`、`changeCalendar()`、`compareSchedules()`、`ApiError`、包含日历的 `getDashboardData()` | 已接入完成/错过、日历新增/修改、跨日期变化、错误与未排期展示；浏览器验收见下方 |
 
 B 的两个参数都是本次调用的输入，不要修改共享 Scheduler 实例的时钟。
-C 总是传 `replanning_start=event.timestamp`，calendar 事件额外传
-`preserve_valid_affected=True`。所有实现和测试替身必须接受这些参数。
+C 总是传 `replanning_start=event.timestamp`；calendar、new assessment 和
+assessment updated 事件额外传 `preserve_valid_affected=True`。这些事件会提供
+较宽的候选集合，但不代表候选任务必须全部移动。所有实现和测试替身必须接受这些参数。
 直接调用 `PlanningPipeline.replan()` 的消费者需要传入已更新的任务和日历；
 API 使用 `PlanningState.replan()` 自动完成这个步骤。
 
@@ -49,6 +50,40 @@ API 使用 `PlanningState.replan()` 自动完成这个步骤。
 ```bash
 .venv/bin/python -m pytest tests/test_scheduler.py -q
 ```
+
+### 新增／更新 Assessment 的 B 侧约定
+
+- C 在调用 Pipeline/B 前先暂存新的 `Assessment` 和 A/C 已协调好的 `Task[]`；B 不读取
+  provider payload，也不负责判断 description 是否改变。
+- `new_assessment` 的新任务没有旧 placement，因此会在 `event.timestamp` 之后加入现有
+  计划；其他 assessment 的有效 placement 继续占用原 slot。
+- 仅修改 deadline 时保持 task ID、依赖、duration、status。deadline 延长不会移动有效
+  placement；deadline 缩短会重排越界 placement，并仅沿依赖传播必要移动。
+- 要求改变并重新拆解时，C/A 必须合并 completed task，不能把它重置或删除；已移除的
+  未完成 task 对应的旧 placement 应在调用 B 前从输入 schedule 清理。B 会拒绝引用未知
+  task 的旧 placement，避免把状态拼接错误静默当作一次成功重排。
+- completed placement 和有效 hard placement 始终保留。如果新 deadline 或 calendar
+  约束会让 immutable placement 非法，本次更新必须失败并回滚，不能为迁就更新而移动它。
+- 返回值仍是完整 `SchedulingResult`。每个未完成 task 必须恰好出现在
+  `scheduled_tasks` 或 `unscheduled_tasks` 之一；排不下是可提交的部分成功，不得静默丢弃。
+
+### Preserved 的稳定判定（D 可直接实现）
+
+以操作前完整 schedule 与成功响应的完整 `scheduled_tasks` 建立 `task_id` 唯一索引，
+按以下互斥规则分类：
+
+| 分类 | 判定 |
+|---|---|
+| `Preserved` | 前后都有相同 `task_id`，`start_time`、`end_time` 表示相同绝对时刻，且 `flexibility` 相同 |
+| `Moved` | 前后都有相同 `task_id`，但上述任一排期属性不同 |
+| `Added` | 只在新 schedule 中出现 |
+| `Removed` | 只在旧 schedule 中出现，且本轮没有同 task 的 `UnscheduledTask` |
+| `Unscheduled` | 成功响应的 `unscheduled_tasks` 中出现；若旧 schedule 有该 task，应优先显示为 Unscheduled 而不是普通 Removed |
+
+`ScheduledTask.id` 是 placement 记录 ID，不作为 moved/preserved 的判定字段；序列化 offset
+不同但绝对时刻相同（例如 `10:00+08:00` 与 `02:00Z`）仍算未移动。比较前后两个完整结果，
+不根据数组顺序或界面当前日期过滤。该规则只用于派生展示，不向 canonical models 或 API
+response 增加字段。
 
 ## 共同验收样例
 
