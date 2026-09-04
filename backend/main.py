@@ -3,6 +3,8 @@
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import os
+import logging
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +28,10 @@ from backend.services import (
     PlanningStateValidationError,
     UnknownPlanningEventReferenceError,
 )
+from backend.schemas.requests import AssessmentChangeRequest
+from backend.services.assessment_changes import AssessmentConflictError
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DEVELOPMENT_ORIGINS = (
     "http://localhost:3000",
@@ -45,11 +51,21 @@ def create_app(
     allowed_origins: Sequence[str] = DEFAULT_DEVELOPMENT_ORIGINS,
     *,
     clock: Callable[[], datetime] | None = None,
+    environment: str | None = None,
+    demo_reset_enabled: bool | None = None,
+    reset_factory: Callable[[], PlanningState] | None = None,
 ) -> FastAPI:
     """Create an API app with an injectable data store for tests and adapters."""
 
     use_default_runtime = store is None and pipeline is None
     selected_store = store or MockDataStore.for_dynamic_provider_demo()
+    environment = environment or os.getenv("STUDYFLOW_ENV", "production")
+    reset_enabled = (demo_reset_enabled if demo_reset_enabled is not None
+                     else os.getenv("STUDYFLOW_ENABLE_DEMO_RESET") == "1")
+    reset_enabled = reset_enabled and environment in {"demo", "development"}
+    baseline = (selected_store.list_assessments(), selected_store.list_tasks(),
+                selected_store.list_calendar_blocks(), selected_store.list_scheduled_tasks(),
+                selected_store.list_planning_events())
     selected_pipeline = (
         PlanningPipeline(
             StudyFlowAgent(configured_llm()),
@@ -74,6 +90,48 @@ def create_app(
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok", "data_mode": "mock"}
+
+    if reset_enabled:
+        @app.post("/demo/reset")
+        def reset_demo() -> dict[str, str]:
+            """Restore all five startup collections; available only in demo/development."""
+            try:
+                fresh = reset_factory() if reset_factory else PlanningState(*baseline)
+                selected_store.reset(
+                    fresh.list_assessments(), fresh.list_tasks(), fresh.list_calendar_blocks(),
+                    fresh.list_scheduled_tasks(), fresh.list_planning_events(),
+                )
+            except Exception as error:
+                logger.error("demo_reset_failed error_type=%s", type(error).__name__)
+                raise HTTPException(500, detail={"code": "demo_reset_failed",
+                                    "message": "Demo reset failed; state was not changed."}) from error
+            logger.info("demo_reset_completed")
+            return {"status": "reset"}
+
+    @app.post("/assessment-changes", response_model=SchedulingResult)
+    def change_assessment(change: AssessmentChangeRequest) -> SchedulingResult:
+        if selected_pipeline is None:
+            raise HTTPException(501, detail={"code": "replanning_not_implemented",
+                                "message": "Agent and Scheduler are not connected."})
+        try:
+            result = selected_store.change_assessment(change.event, change.assessment, selected_pipeline)
+            logger.info("assessment_change_completed event_type=%s", change.event.event_type.value)
+            return result
+        except DuplicatePlanningEventError as error:
+            raise HTTPException(409, detail={"code": "duplicate_event_id", "message": str(error)}) from error
+        except AssessmentConflictError as error:
+            raise HTTPException(409, detail={"code": "assessment_conflict", "message": str(error)}) from error
+        except UnknownPlanningEventReferenceError as error:
+            raise HTTPException(422, detail={"code": "unknown_reference", "message": str(error)}) from error
+        except PlanningStateValidationError as error:
+            logger.error("assessment_change_invalid_result")
+            raise HTTPException(500, detail={"code": "invalid_planning_state", "message": str(error)}) from error
+        except ValueError as error:
+            raise HTTPException(422, detail={"code": "invalid_replanning_input", "message": str(error)}) from error
+        except Exception as error:
+            logger.error("assessment_change_failed error_type=%s", type(error).__name__)
+            raise HTTPException(500, detail={"code": "assessment_change_failed",
+                                "message": "Assessment change failed; state was not changed."}) from error
 
     @app.get("/assessments", response_model=list[Assessment])
     def list_assessments() -> list[Assessment]:
@@ -125,16 +183,7 @@ def create_app(
 
         if selected_pipeline is not None:
             try:
-                planning_run = selected_pipeline.run_plan(
-                    selected_store.list_assessments(),
-                    selected_store.list_calendar_blocks(),
-                    selected_store.list_scheduled_tasks(),
-                )
-                selected_store.replace_plan(
-                    planning_run.assessments,
-                    planning_run.tasks,
-                    planning_run.result.scheduled_tasks,
-                )
+                result = selected_store.generate_plan(selected_pipeline)
             except PlanningStateValidationError as error:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -159,7 +208,7 @@ def create_app(
                         "message": "The planning pipeline could not complete.",
                     },
                 ) from error
-            return planning_run.result
+            return result
 
         return SchedulingResult(
             scheduled_tasks=selected_store.list_scheduled_tasks(),

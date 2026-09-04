@@ -51,6 +51,23 @@ export function generatePlan(signal: AbortSignal): Promise<SchedulingResult> {
   return requestJson<SchedulingResult>("/plan", signal, { method: "POST" });
 }
 
+// D: use the shared operation lock and confirmation before resetting.
+// A 404 means the server has not enabled this demo-only capability.
+export function resetDemo(signal: AbortSignal): Promise<{ status: string }> {
+  return requestJson("/demo/reset", signal, { method: "POST" });
+}
+
+export function changeAssessment(
+  change: { event: PlanningEvent; assessment: Assessment },
+  signal: AbortSignal,
+): Promise<SchedulingResult> {
+  return requestJson("/assessment-changes", signal, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(change),
+  });
+}
+
 // Submit each observation once. Do not first POST it to /planning-events.
 export function replan(event: PlanningEvent, signal: AbortSignal): Promise<SchedulingResult> {
   return requestJson<SchedulingResult>("/replan", signal, {

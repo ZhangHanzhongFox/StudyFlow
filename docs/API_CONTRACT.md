@@ -9,6 +9,9 @@ to `create_app()` by the deployment or test configuration.
 
 ## Endpoints
 
+September 4 additions: `POST /assessment-changes` and opt-in `POST /demo/reset`.
+Existing canonical models and SchedulingResult fields are unchanged.
+
 | Method | Path | Response | Current behavior |
 |---|---|---|---|
 | `GET` | `/health` | status object | Reports mock data mode |
@@ -24,6 +27,73 @@ to `create_app()` by the deployment or test configuration.
 
 FastAPI also provides generated OpenAPI documentation at `/docs` while the
 application is running.
+
+## September 4: full reset and assessment changes
+
+### Demo reset
+
+`POST /demo/reset` has no body and returns `{"status":"reset"}` (200).
+It restores **all five collections** to the validated application-start snapshot:
+assessments, tasks, calendar blocks, scheduled tasks, and planning events.
+Default dynamic startup has provider-mock assessments/calendar and empty
+tasks/schedule/events, so Plan can be run again. An injected demo store restores
+its exact initial fixture, including completed tasks and historical events.
+Repeated reset calls produce the same state. This is not `/plan`.
+
+The route is absent (404, also absent from OpenAPI) unless BOTH
+`STUDYFLOW_ENV=demo` (or `development`) and `STUDYFLOW_ENABLE_DEMO_RESET=1`.
+Production mode never registers it, even if the flag is set. Keep demo servers
+local: this is an environment gate, not authentication. Tests/server configuration
+may inject a `reset_factory`; clients cannot supply paths or arbitrary reset data.
+Invalid fixtures/internal failures return 500 `demo_reset_failed` with no mutation.
+Reset and all planning writes serialize through the same state lock.
+
+D: confirm the loss of demo changes, hold the existing operation lock through
+the write and refresh, clear old differences/failure lists, and refresh all five
+collections with `getDashboardData`. A failed refresh retries GET only. No reset
+event is appended: events are restored exactly, so old event IDs may be reused
+after reset. `resetDemo(signal)` is available in the API client.
+
+### Assessment changes
+
+`POST /assessment-changes` accepts `{"event": PlanningEvent, "assessment": Assessment}`.
+Use a complete canonical Assessment (not a partial patch or raw Canvas payload).
+The event type is `new_assessment` or `assessment_updated`; reference_id must
+equal assessment.id. Pydantic normalizes whitespace, enums and aware datetimes
+at the HTTP boundary. Unknown/extra fields are rejected (422).
+
+New: ID must not exist; classification/decomposition runs only for that entity.
+Update: ID must already exist. Changes only to deadline, unlock_at or weightage
+reuse existing tasks/IDs/statuses. Changes to title, description, type,
+course_code, is_group or group_size classify and decompose again.
+
+For changed requirements, completed tasks and their dependency ancestry are
+retained verbatim as history. New work receives event-scoped deterministic IDs;
+it is NOT automatically considered satisfied by old completed work. Unobserved
+incomplete old tasks are replaced. Changes that would remove an observed task
+or replace in-progress / incomplete hard work return 409 `assessment_conflict`;
+this conservative boundary requires a team/user decision, not silent history loss.
+
+The Agent discovers affected tasks; Scheduler receives the staged entities,
+event timestamp and `preserve_valid_affected=True`. Unrelated valid placements,
+completed and hard work remain protected. Impossible immutable constraints
+return 422. Normal lack of space returns 200 SchedulingResult with explicit
+unscheduled_tasks and commits the valid partial result.
+
+Assessment, tasks, schedule and event commit atomically; calendar is unchanged.
+Duplicate event ID: 409 `duplicate_event_id`; duplicate new assessment ID:
+409 `assessment_conflict`; missing updated entity: 422 `unknown_reference`.
+Invalid generated output: 500 `invalid_planning_state`; internal exceptions:
+500 `assessment_change_failed`; unconnected pipeline: 501 `replanning_not_implemented`.
+All failures preserve all five collections. Logs record operation/error types,
+not assessment descriptions or provider exception contents.
+
+Bare assessment events on `/replan` or `/planning-events` now return 422:
+use this endpoint so an observation cannot pretend to update an entity.
+D: use `changeAssessment(change, signal)`, keep the same event ID for retries,
+and refresh assessments as well as the other four collections. Existing
+SchedulingResult and compareSchedules semantics are unchanged; Preserved means
+same task_id and equal absolute start/end instants in both snapshots.
 
 ## Scheduling result
 
@@ -200,8 +270,8 @@ tasks. Failure details should remain visible until the next planning action;
 
 `frontend/src/api.ts` exports `replan`, `changeCalendar`, `compareSchedules`,
 and `ApiError` (`status`, `code`, `message`). `getDashboardData` also includes
-`calendarBlocks`. These functions are ready for D to wire into UI actions;
-the completed/missed buttons and calendar form are not implemented here.
+`calendarBlocks`. The completed/missed buttons and calendar form are connected.
+The new reset and assessment client functions still require D's UI controls.
 
 See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for ownership, common test inputs,
 expected times, and the reproducible verification command.
