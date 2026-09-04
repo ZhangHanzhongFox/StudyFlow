@@ -85,9 +85,10 @@ published on exceptions. `/replan` takes a bare event; `/calendar-changes`
 takes the `CalendarChangeRequest` wrapper, without changing domain fields.
 
 The pipeline passes `event.timestamp` as `replanning_start` to the Scheduler.
-For calendar events it also sets `preserve_valid_affected=True`; A's broad
-candidate set does not force all valid tasks to move. B checks actual time
-constraints and propagates necessary dependency moves. See
+For calendar, new-assessment, and assessment-update events it also sets
+`preserve_valid_affected=True`; A's broad candidate set does not force all
+valid tasks to move. B checks actual time constraints and propagates necessary
+dependency moves. See
 [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for the implemented shared baseline.
 
 ## Stable Python interfaces
