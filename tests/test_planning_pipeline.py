@@ -49,7 +49,6 @@ class RecordingScheduler:
         self.fixture_schedule = list(fixture_schedule)
         self.scheduled_tasks_received: list[Task] = []
         self.affected_task_ids_received: set[str] = set()
-        self.preserve_valid_affected_received = False
 
     def schedule_tasks(
         self,
@@ -73,7 +72,6 @@ class RecordingScheduler:
         preserve_valid_affected: bool = False,
     ) -> SchedulingResult:
         self.affected_task_ids_received = set(affected_task_ids)
-        self.preserve_valid_affected_received = preserve_valid_affected
         return SchedulingResult(scheduled_tasks=list(existing_schedule))
 
 
@@ -155,27 +153,4 @@ def test_replan_separates_affected_task_discovery_from_time_placement() -> None:
     )
 
     assert scheduler.affected_task_ids_received == agent.affected_task_ids
-    assert scheduler.preserve_valid_affected_received is False
     assert result.scheduled_tasks == store.list_scheduled_tasks()
-
-
-def test_assessment_replan_requests_minimal_schedule_changes() -> None:
-    store = MockDataStore()
-    agent = FixtureAgent(store.list_tasks())
-    scheduler = RecordingScheduler(store.list_scheduled_tasks())
-    pipeline = PlanningPipeline(agent, scheduler)
-    event = next(
-        event
-        for event in store.list_planning_events()
-        if event.event_type.value == "assessment_updated"
-    )
-
-    pipeline.replan(
-        event,
-        store.list_assessments(),
-        store.list_tasks(),
-        store.list_calendar_blocks(),
-        store.list_scheduled_tasks(),
-    )
-
-    assert scheduler.preserve_valid_affected_received is True

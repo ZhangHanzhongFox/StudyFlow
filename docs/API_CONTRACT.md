@@ -149,11 +149,11 @@ block ID, and the block must have a valid timezone-aware time range. Invalid
 wrappers return standard FastAPI 422 validation details.
 
 The backend stages the new calendar before reference validation and planning,
-so a new block does not have to exist in the old state. Calendar, new-assessment,
-and assessment-update events set `preserve_valid_affected=True` on the Scheduler:
-A may return a broad incomplete candidate set, while B keeps valid placements
-and moves conflicting work and necessary dependents. Hard placements and
-completed history are immutable. A change that would overlap them is rejected with 422
+so a new block does not have to exist in the old state. Calendar events set
+`preserve_valid_affected=True` on the Scheduler: A may return all incomplete
+tasks for consideration, while B keeps valid placements and moves conflicting
+work and necessary dependents. Hard placements and completed history are
+immutable. A change that would overlap them is rejected with 422
 `invalid_replanning_input`, with no calendar or event mutation.
 Likewise, a missed task with a hard placement cannot be moved automatically;
 the request is rejected rather than falsely reporting a successful recovery.
@@ -191,9 +191,8 @@ planning and commit under the state lock. Separate GET requests are not a
 versioned snapshot across concurrent users. Automatic polling, persistent
 storage, and multi-user isolation are outside this contract.
 
-D saves the old schedule before submitting, compares by `task_id`, absolute
-start/end times, and `flexibility`, and shows added/moved/preserved/removed
-tasks plus failure messages. A changed placement `id` alone is not a move.
+D saves the old schedule before submitting, compares by `task_id` and absolute
+start/end times, and shows added/moved/removed tasks plus failure messages.
 After success, refresh `/tasks`, `/schedule`, `/planning-events`, and
 `/calendar-blocks`. Do not call `/plan` to refresh: that route regenerates
 tasks. Failure details should remain visible until the next planning action;
