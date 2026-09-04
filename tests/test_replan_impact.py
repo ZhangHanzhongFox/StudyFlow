@@ -176,6 +176,37 @@ def test_leaf_event_does_not_propagate_upstream(
     assert affected == expected
 
 
+@pytest.mark.parametrize("event_type", [PlanningEventType.TASK_MISSED, PlanningEventType.TASK_COMPLETED])
+def test_logged_impact_paths_are_real_and_cross_completed_bridges(
+    complex_tasks: list[Task], event_type: PlanningEventType, caplog,
+) -> None:
+    tasks = [
+        *complex_tasks,
+        make_task("done-bridge", ("trigger",), TaskStatus.COMPLETED),
+        make_task("after-bridge", ("done-bridge",), TaskStatus.PENDING),
+    ]
+    event = task_event(event_type)
+    tasks = staged_tasks(tasks, event)
+    tasks_by_id = {task.id: task for task in tasks}
+    with caplog.at_level("INFO", logger="backend.agents.workflow"):
+        affected = StudyFlowAgent().find_affected_task_ids(event, tasks)
+    records = [record for record in caplog.records if record.msg.startswith("Agent impact candidate")]
+    assert {record.args[1] for record in records} == affected
+    paths = {record.args[1]: record.args[2] for record in records}
+    assert paths["after-bridge"] == ["trigger", "done-bridge", "after-bridge"]
+    assert paths["tail"] == ["trigger", "left", "join", "tail"]
+    for task_id, path in paths.items():
+        assert tasks_by_id[task_id].status is not TaskStatus.COMPLETED
+        assert path[0] == "trigger" and path[-1] == task_id
+        for parent, child in zip(path, path[1:]):
+            assert parent in tasks_by_id[child].dependencies
+    original_messages = [record.getMessage() for record in caplog.records]
+    caplog.clear()
+    with caplog.at_level("INFO", logger="backend.agents.workflow"):
+        assert StudyFlowAgent().find_affected_task_ids(event, list(reversed(tasks))) == affected
+    assert [record.getMessage() for record in caplog.records] == original_messages
+
+
 def test_complex_missed_scope_reaches_real_scheduler_and_preserves_other_work(
     complex_tasks: list[Task],
 ) -> None:

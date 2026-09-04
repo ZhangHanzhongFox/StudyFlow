@@ -163,6 +163,115 @@ A 的返回值是「需要重新评估的候选集合」，不等于所有场景
 .venv/bin/python -m pytest -q
 ```
 
+## 9 月 4 日 A：异常处理与 Assessment 交接
+
+本轮交付边界为 **A 内修复 + 已验证的现有接口组合约定**，不代表已完成
+Assessment 写入 API、自动重拆替换或前端 fallback 原因展示，也不代表四人已签收。
+不修改五个 canonical models、公共 ID 算法、Agent/Scheduler 接口或 HTTP response shape。
+
+### 已实现的 Agent 防线
+
+- 分类和拆解结果在 Agent 内再次验证；provider 返回 Pydantic 实例也不能绕过嵌套字段验证。
+  错误字段、空 Task[]、不可解析结构、非法值、自依赖、重复步骤/依赖、未知依赖和环均拒绝。
+- LLM 草稿的时长和优先级要求真正的整数，拒绝布尔值、字符串和浮点数；不改变 canonical Task。
+  任一 LLM 阶段失败时使用完整 fallback，不让部分坏结果进入 Scheduler。
+- Canvas description 缺失/null 仍由既有 adapter 转为 `""`；Agent 接收 canonical Assessment，
+  不给 schema 新增可空字段。空白或信息不足使用通用准备步骤，先确认要求；不猜题目、技术栈、
+  grading rules、demo 或 design note。模板时间是估计，不是课程事实。
+- Presentation 按 `is_group` 区分个人和组队；materials/notes 使用通用措辞。
+  Exam/Midterm 仅生成准备工作。模板的 step key、ID 生成方式、依赖结构和时长保持不变。
+- 原有下游闭包语义不变：只沿依赖正向传播，穿过 completed 后继续遍历，再排除 completed。
+  本轮额外保存本次遍历的一条确定性见证路径用于日志，不再调用 LLM 推测原因。
+
+结构/图验证不等于自然语言事实核验；LLM 输出的语义真实性仍需源要求或人工核对。
+`description=provided` 仅表示非空，不代表要求完整。
+
+### new_assessment：已验证的调用前提，不是新增端点
+
+C 的接线需在暂存状态中完成以下流程，A 的返回类型保持原样：
+
+1. 规范化并验证新 Assessment，检查它的 ID 未被已有 Assessment 占用。
+2. 调用 `classify_assessment(new)`，将已验证类型用于 `decompose_assessment(classified)`。
+3. 将生成的 Task[] 合入旧集合；保留旧任务、completed、排期和事件。
+   校验完整图、跨集合引用及重复 ID，不重复添加同一 Assessment 的任务。
+4. 调用现有 `PlanningPipeline.replan(event, assessments, tasks, calendar, schedule)`。
+   A 选出新 Assessment 的未完成任务；B 按事件时间安排，保留其他有效排期。
+5. C 负责最终事务与事件去重；无法排期使用原有 `unscheduled_tasks`，不能静默丢弃新任务。
+
+`tests/test_assessment_agent_handoff.py` 用测试内暂存状态和真实 Agent/Pipeline/State/Scheduler
+验证上述调用组合，包括四种类型、provider 失败、时间不够时的明确失败结果。
+测试初始化暂存状态不等于生产 assessment upsert 事务；该事务仍待 C 接线。
+裸 `/replan` 不执行步骤 1–3；`/plan` 会重建全量任务，不能用来冒充保留进度的新增入口。
+
+### assessment_updated：影响范围与保留策略
+
+- A 只有 `PlanningEvent + Task[]`，没有前后 Assessment；无法判断哪个要求字段变化。
+  当前确定性约定是返回该 Assessment **全部未完成任务**。同 Assessment 的独立任务也在候选中，
+  这是 assessment 级保守范围；不要套用 task event 的“只影响下游”规则。
+- completed、其他 Assessment 排除；全 completed 或没有任务时返回空集合。
+  A 无法区分“Assessment 不存在”和“存在但无任务”；Assessment 引用存在性由 C 校验。
+- 仅 deadline/unlock 等时间约束变化：C 暂存新 Assessment，保留 Task 身份、内容、依赖、完成状态，
+  再交 A/B；不重新分类或拆解。若新约束与 completed/hard 历史冲突，B 拒绝，C 应回滚整个更新。
+  当前测试验证的是输入更新后的重排边界，不宣称已有 Assessment 写入事务。
+- 要求变化且需要重拆：**本轮不自动替换旧 Task[]**。保留原任务/完成状态/排期/事件，
+  由 C 阻断自动替换并提示需要确认；该阻断是待 C 接线的约定，不是新上线的 API 行为。
+  不通过任务名或相同 step key 推断新任务已完成；相同 ID 也不证明要求语义相同。
+- 四人同步前不实施删除/合并：completed 可能依赖旧未完成任务，历史事件也可能引用旧任务。
+  仅保留 completed 后删除其余任务仍会破坏引用。未来替换必须共同确定新旧身份映射、
+  旧任务/事件的保留或迁移、completed 语义、依赖重连及 hard 排期处理，不能重置进度掩盖问题。
+
+### Agent Activity：证据来源与可用文案
+
+`backend.agents.workflow` 使用 Python 日志记录实际分支：正常决策为 INFO，fallback 为 WARNING。
+日志是诊断输出，不是新增公共接口或持久化 Activity 模型；不从前端解析服务端日志。
+INFO 是否展示由 C 的日志配置决定；测试可以通过 `--log-cli-level=INFO` 查看。
+
+| 实际证据 | 可用的简短原因 |
+|---|---|
+| `template_default` | 按 assessment 类型使用准备模板；用时为估计，请先确认要求 |
+| `validated_llm` | 结构化拆解已通过字段与依赖校验；任务按这些前置依赖准备 |
+| `provider_output_unavailable` | 模型服务未提供可用结构化结果，已使用确定性 fallback |
+| `invalid_structure` | 模型结果字段或值不合法，已使用确定性 fallback |
+| `invalid_dependencies` | 模型生成的依赖图无效，已使用确定性 fallback |
+| `dependency_candidates` + 实际路径 | 此未完成任务沿依赖路径受到引用任务影响，需要重新评估 |
+| `assessment_candidates` | 重新评估这项 assessment 的未完成工作；事件未提供要求差异 |
+| `calendar_candidates` | 重新检查未完成任务与所提供日历的兼容性 |
+
+分类 fallback 保留已规范化类型；拆解 fallback 使用模板。`template_fallback` 记录最终模板输出，
+前面的 WARNING 指明真实失败阶段。没有配置 LLM 的正常模板路径不误报为 provider 故障。
+日志包含操作、assessment/event/task ID、计数和真实依赖边/路径；不包含 description、
+provider 生成的任务正文、完整响应或原始异常消息。见证路径可能穿过 completed，
+但 completed 不作为受影响候选输出；分叉汇合只记录一条可复现的路径，并非声称只有一条路径。
+
+D 现在可以使用事件类型/reference、Task 依赖和请求前后排期支持的文案，但必须区分：
+
+- “事件已记录”不等于“已重排”；观察专用 `/planning-events` 不调用 A/B。
+- “依赖上需要重新评估”不等于“排期已移动”；实际移动以成功响应前后的 schedule diff 为准。
+- 只有当前任务图时，只能描述当前依赖，不得重建并宣称历史事件当时的完整原因。
+- 单凭事件/Task/SchedulingResult 不能推断 LLM 或 fallback 路径；无证据时不展示具体原因。
+  不把原因塞入 Task.name、PlanningEvent.reference_id 或 Scheduler 的失败 message。
+
+### B/C/D 待对齐与专项复验
+
+- **B**：候选范围不等于移动集合；本轮不改变 Scheduler 参数，assessment 事件仍沿用
+  `preserve_valid_affected=False`。只保证无关的有效排期可保留，不承诺 assessment 候选最小移动。
+- **C**：确认 Assessment 输入/旧新版本比较与暂存事务，接线前不得宣称新增/更新已经端到端支持；
+  确认需重拆时的用户提示、历史引用保护，以及日志的请求关联/最终事务成功状态。
+- **D**：依据上表及实际可见证据调整 Activity；需显示运行时 fallback 原因时，与 C 先提交
+  原因传输、请求关联、成功/失败语义的合同提案给四人确认。本轮没有新增解释字段或端点。
+
+```bash
+.venv/bin/python -m pytest tests/test_agent_workflow.py tests/test_agent_boundaries.py tests/test_bedrock_llm.py tests/test_replan_impact.py tests/test_assessment_agent_handoff.py tests/test_planning_pipeline.py tests/test_replan_acceptance.py -q
+.venv/bin/python -m pytest -q
+```
+
+专项覆盖输出验证、三类工作流（Exam/Midterm 分别测试）、复杂依赖原因、Assessment 交接和真实调用链。
+不需要凭据或付费 LLM 请求；本轮未执行真实云服务或前端浏览器验收。
+
+2026-09-04 本轮 A 复验：上述专项命令 **300 passed**，完整后端 **386 passed**，
+`git diff --check` 通过。相对本轮开始的 173 项后端基线新增 213 项参数化/聚焦测试。
+默认运行集成测试改为按实际依赖关系选取任务，不再把名称中的 `slides` 当作稳定标识。
+
 ## D 的调用顺序
 
 1. 保存当前 `schedule`，禁用重复点击，创建一次操作的 event ID。
