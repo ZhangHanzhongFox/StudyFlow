@@ -552,3 +552,286 @@ def test_replan_reports_deadline_and_dependency_failures_when_no_slot_remains() 
         SchedulingFailureReason.DEADLINE_CONSTRAINT,
         SchedulingFailureReason.DEPENDENCY_CONFLICT,
     ]
+
+
+def test_multiple_tasks_competing_for_one_slot_are_not_double_booked() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 2, 10, tzinfo=SGT)
+    )
+    tasks = [
+        make_task("higher-priority", priority=10),
+        make_task("lower-priority", priority=1),
+        make_task(
+            "dependent",
+            dependencies=["lower-priority"],
+            priority=20,
+        ),
+    ]
+
+    result = make_scheduler().schedule_tasks([assessment], tasks, [])
+
+    assert [item.task_id for item in result.scheduled_tasks] == [
+        "higher-priority",
+        "lower-priority",
+    ]
+    assert result.scheduled_tasks[0].end_time <= result.scheduled_tasks[1].start_time
+    assert [(item.task_id, item.reason) for item in result.unscheduled_tasks] == [
+        ("dependent", SchedulingFailureReason.DEADLINE_CONSTRAINT),
+    ]
+
+
+def test_hard_blocks_filling_every_study_window_report_each_task() -> None:
+    deadline = datetime(2026, 9, 3, 22, tzinfo=SGT)
+    blocks = [
+        CalendarBlock(
+            id=f"full-day-{day}",
+            title="Unavailable",
+            start_time=datetime(2026, 9, day, 8, tzinfo=SGT),
+            end_time=datetime(2026, 9, day, 22, tzinfo=SGT),
+            flexibility=Flexibility.HARD,
+        )
+        for day in (2, 3)
+    ]
+    tasks = [make_task("one"), make_task("two")]
+
+    result = make_scheduler().schedule_tasks(
+        [make_assessment(deadline=deadline)], tasks, blocks,
+    )
+
+    assert result.scheduled_tasks == []
+    assert {item.task_id for item in result.unscheduled_tasks} == {"one", "two"}
+    assert all(
+        item.reason is SchedulingFailureReason.DEADLINE_CONSTRAINT
+        for item in result.unscheduled_tasks
+    )
+
+
+def test_new_assessment_tasks_join_plan_without_moving_existing_work() -> None:
+    existing_assessment = make_assessment("existing")
+    new_assessment = make_assessment(
+        "new",
+        deadline=datetime(2026, 9, 2, 12, tzinfo=SGT),
+    )
+    tasks = [
+        make_task(
+            "existing-task",
+            assessment_id="existing",
+            status=TaskStatus.SCHEDULED,
+        ),
+        make_task("new-first", assessment_id="new", priority=5),
+        make_task(
+            "new-second",
+            assessment_id="new",
+            dependencies=["new-first"],
+        ),
+    ]
+    existing = ScheduledTask(
+        id="existing-placement",
+        task_id="existing-task",
+        start_time=datetime(2026, 9, 2, 10, tzinfo=SGT),
+        end_time=datetime(2026, 9, 2, 11, tzinfo=SGT),
+        flexibility=Flexibility.SOFT,
+    )
+
+    result = make_scheduler().reschedule_tasks(
+        [existing_assessment, new_assessment],
+        tasks,
+        [],
+        [existing],
+        {"new-first", "new-second"},
+        replanning_start=PLANNING_START,
+        preserve_valid_affected=True,
+    )
+
+    by_task_id = {item.task_id: item for item in result.scheduled_tasks}
+    assert result.unscheduled_tasks == []
+    assert by_task_id["existing-task"] == existing
+    assert by_task_id["new-first"].end_time <= by_task_id["new-second"].start_time
+    assert by_task_id["new-second"].end_time <= new_assessment.deadline
+
+
+def test_extended_assessment_deadline_preserves_all_valid_placements() -> None:
+    tasks = [
+        make_task("first", status=TaskStatus.SCHEDULED),
+        make_task(
+            "second",
+            dependencies=["first"],
+            status=TaskStatus.SCHEDULED,
+        ),
+    ]
+    existing = [
+        ScheduledTask(
+            id=f"placement-{task_id}",
+            task_id=task_id,
+            start_time=datetime(2026, 9, 2, hour, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, hour + 1, tzinfo=SGT),
+            flexibility=Flexibility.SOFT,
+        )
+        for task_id, hour in (("first", 9), ("second", 10))
+    ]
+
+    result = make_scheduler().reschedule_tasks(
+        [make_assessment(deadline=datetime(2026, 9, 5, 22, tzinfo=SGT))],
+        tasks,
+        [],
+        existing,
+        {"first", "second"},
+        replanning_start=datetime(2026, 9, 2, 8, 30, tzinfo=SGT),
+        preserve_valid_affected=True,
+    )
+
+    assert {
+        item.task_id: item for item in result.scheduled_tasks
+    } == {
+        item.task_id: item for item in existing
+    }
+    assert result.unscheduled_tasks == []
+
+
+def test_shortened_deadline_moves_only_invalid_placement() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 2, 12, tzinfo=SGT)
+    )
+    tasks = [
+        make_task("valid", status=TaskStatus.SCHEDULED),
+        make_task("too-late", status=TaskStatus.SCHEDULED),
+        make_task(
+            "unaffected",
+            assessment_id="other",
+            status=TaskStatus.SCHEDULED,
+        ),
+    ]
+    existing = [
+        ScheduledTask(
+            id="valid-placement",
+            task_id="valid",
+            start_time=datetime(2026, 9, 2, 9, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 10, tzinfo=SGT),
+            flexibility=Flexibility.SOFT,
+        ),
+        ScheduledTask(
+            id="late-placement",
+            task_id="too-late",
+            start_time=datetime(2026, 9, 2, 14, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 15, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        ),
+        ScheduledTask(
+            id="unaffected-placement",
+            task_id="unaffected",
+            start_time=datetime(2026, 9, 2, 15, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 16, tzinfo=SGT),
+            flexibility=Flexibility.SOFT,
+        ),
+    ]
+
+    result = make_scheduler().reschedule_tasks(
+        [assessment, make_assessment("other")],
+        tasks,
+        [],
+        existing,
+        {"valid", "too-late"},
+        replanning_start=PLANNING_START,
+        preserve_valid_affected=True,
+    )
+
+    by_task_id = {item.task_id: item for item in result.scheduled_tasks}
+    assert by_task_id["valid"] == existing[0]
+    assert by_task_id["unaffected"] == existing[2]
+    assert by_task_id["too-late"].id == "scheduled-too-late"
+    assert by_task_id["too-late"].end_time <= assessment.deadline
+
+
+def test_assessment_replan_preserves_completed_and_hard_placements() -> None:
+    tasks = [
+        make_task("done", status=TaskStatus.COMPLETED),
+        make_task("fixed", status=TaskStatus.SCHEDULED),
+        make_task("flexible", status=TaskStatus.SCHEDULED),
+    ]
+    existing = [
+        ScheduledTask(
+            id="done-placement",
+            task_id="done",
+            start_time=datetime(2026, 9, 2, 8, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 9, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        ),
+        ScheduledTask(
+            id="fixed-placement",
+            task_id="fixed",
+            start_time=datetime(2026, 9, 2, 12, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 13, tzinfo=SGT),
+            flexibility=Flexibility.HARD,
+        ),
+        ScheduledTask(
+            id="flexible-placement",
+            task_id="flexible",
+            start_time=datetime(2026, 9, 2, 10, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 11, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        ),
+    ]
+
+    result = make_scheduler().reschedule_tasks(
+        [make_assessment()],
+        tasks,
+        [],
+        existing,
+        {task.id for task in tasks},
+        replanning_start=PLANNING_START,
+        preserve_valid_affected=True,
+    )
+
+    assert {
+        item.task_id: item for item in result.scheduled_tasks
+    } == {
+        item.task_id: item for item in existing
+    }
+    assert result.unscheduled_tasks == []
+
+
+def test_shortened_deadline_reports_every_active_task_when_plan_no_longer_fits() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 2, 9, tzinfo=SGT)
+    )
+    tasks = [
+        make_task("first", status=TaskStatus.SCHEDULED),
+        make_task(
+            "dependent",
+            dependencies=["first"],
+            status=TaskStatus.SCHEDULED,
+        ),
+        make_task("independent", status=TaskStatus.SCHEDULED),
+    ]
+    existing = [
+        ScheduledTask(
+            id=f"old-{task.id}",
+            task_id=task.id,
+            start_time=datetime(2026, 9, 2, 10 + index, tzinfo=SGT),
+            end_time=datetime(2026, 9, 2, 11 + index, tzinfo=SGT),
+            flexibility=Flexibility.FLEXIBLE,
+        )
+        for index, task in enumerate(tasks)
+    ]
+
+    result = make_scheduler().reschedule_tasks(
+        [assessment],
+        tasks,
+        [],
+        existing,
+        {task.id for task in tasks},
+        replanning_start=PLANNING_START,
+        preserve_valid_affected=True,
+    )
+
+    assert result.scheduled_tasks[0].task_id == "first"
+    assert result.scheduled_tasks[0].end_time == assessment.deadline
+    assert {item.task_id: item.reason for item in result.unscheduled_tasks} == {
+        "dependent": SchedulingFailureReason.DEADLINE_CONSTRAINT,
+        "independent": SchedulingFailureReason.DEADLINE_CONSTRAINT,
+    }
+    assert {
+        item.task_id for item in result.scheduled_tasks
+    } | {
+        item.task_id for item in result.unscheduled_tasks
+    } == {task.id for task in tasks}

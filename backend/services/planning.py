@@ -93,7 +93,14 @@ class PlanningPipeline:
             existing_schedule,
             affected_task_ids,
             replanning_start=event.timestamp,
+            # Assessment ingestion/update and calendar changes reconsider a
+            # broad candidate set. Valid existing placements stay put; the
+            # scheduler still moves invalid entries and required dependents.
             preserve_valid_affected=(
-                event.event_type is PlanningEventType.CALENDAR_CHANGED
+                event.event_type in {
+                    PlanningEventType.NEW_ASSESSMENT,
+                    PlanningEventType.ASSESSMENT_UPDATED,
+                    PlanningEventType.CALENDAR_CHANGED,
+                }
             ),
         )
