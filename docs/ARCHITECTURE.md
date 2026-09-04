@@ -109,6 +109,16 @@ boundaries while parallel development is underway.
 
 ## Current runtime state
 
+September 4: `PlanningState.change_assessment()` stages the entity and reconciles
+tasks via the existing Agent methods, then invokes the existing Scheduler and
+commits all artifacts under the state lock. Timing-only updates preserve task
+identity. Requirement changes retain completed history; unsafe observed-task
+removal is an explicit conflict. No new Agent/Scheduler protocol is required.
+`generate_plan()` now holds the same lock as observations and reset. The
+environment-gated `/demo/reset` restores the complete validated startup snapshot,
+including events, independently of regeneration. HTTP wrappers and frontend
+integration rules are documented in API_CONTRACT and REPLAN_HANDOFF.
+
 The Agent / Workflow implementation can classify and decompose assessments
 using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task

@@ -1,5 +1,25 @@
 # 9 月 3 日 Replan 联调约定
 
+## 9 月 4 日 C 增量交接（待 A/B/D 人工签收）
+
+- `POST /demo/reset`：无 body，200 `{status:"reset"}`，恢复启动时全部五个集合。
+  必须同时设置 `STUDYFLOW_ENV=demo` 和 `STUDYFLOW_ENABLE_DEMO_RESET=1`；默认/生产不存在此路由。
+- `POST /assessment-changes`：`{event, assessment}`，Assessment 为完整 canonical 对象，
+  event 类型为 new_assessment / assessment_updated，reference_id 等于 assessment.id。
+  返回原 SchedulingResult，部分成功仍是 200；失败全部回滚，重复事件 409。
+- deadline/unlock/weightage 更新保留任务；要求字段变化重新拆解，保留 completed 历史，
+  新任务不自动继承旧完成状态。涉及删除有事件记录的任务、in_progress 或未完成 hard 工作时
+  返回 409，需要团队明确迁移规则。A/B 公共接口未改变。
+- D 可调用新增 `resetDemo` / `changeAssessment`；仍用原操作锁，reset 前确认，
+  成功后刷新五集合。Reset 清除 UI 旧对比/失败提示；不要调用 Regenerate Plan 替代 reset。
+- Preserved 判定：前后同 task_id 且 start/end 代表同一绝对时间；该展示由 D 接入。
+- `tests/test_september4_integration.py` 复用 `data/scenarios/replan_acceptance.json`，
+  覆盖 reset 重复恢复、三类新增、deadline 部分失败、要求变更保留 completed、错误回滚。
+  自动测试不是四人人工签收；D 的新按钮/表单仍需使用这些约定联调。
+- 无真实 Calendar OAuth 或写回。完整错误码和保守迁移边界见 API_CONTRACT。
+- C 本轮验证：后端 191 项通过，既有浏览器回归 11 项通过，TypeScript 和生产构建通过。
+  新 reset/Assessment HTTP 测试包含在后端结果中；新增 UI 尚未实现，不能算作新 UI 验收通过。
+
 这份约定已经落实到后端契约、默认实现、前端 API client 和自动验收样例。
 它是供 A/B/C/D 使用的共同基线，不代表四位成员已进行人工签收。
 接口的权威说明见 [API_CONTRACT.md](API_CONTRACT.md)。不需要 LLM 或 AWS。

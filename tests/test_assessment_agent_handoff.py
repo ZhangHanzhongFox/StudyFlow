@@ -66,7 +66,8 @@ class InspectReplanScheduler(StudyScheduler):
         self.scopes.append(set(affected_task_ids))
         self.inputs.append([item.model_copy(deep=True) for item in tasks])
         assert replanning_start == at("09:00")
-        assert preserve_valid_affected is False
+        # B now preserves valid assessment placements as well as calendar work.
+        assert preserve_valid_affected is True
         return super().reschedule_tasks(
             assessments, tasks, calendar_blocks, existing_schedule, affected_task_ids,
             replanning_start=replanning_start, preserve_valid_affected=preserve_valid_affected,

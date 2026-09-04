@@ -1,5 +1,13 @@
 # StudyFlow
 
+### September 4 demo integration
+
+Run locally with `STUDYFLOW_ENV=demo STUDYFLOW_ENABLE_DEMO_RESET=1 STUDYFLOW_LLM_PROVIDER=none .venv/bin/python -m uvicorn backend.main:app` to enable full `POST /demo/reset`.
+Without both demo settings, reset is absent. It restores all five startup collections,
+not just a regenerated plan. `POST /assessment-changes` atomically adds/updates a
+canonical assessment, tasks and schedule. See `docs/API_CONTRACT.md` for payloads,
+history-preservation limits and frontend handoff.
+
 StudyFlow turns university assessment deadlines into executable study
 workflows, schedules them around existing commitments, observes progress, and
 replans when circumstances change.

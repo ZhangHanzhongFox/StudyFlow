@@ -242,6 +242,7 @@ class PlanningState:
     def add_planning_event(self, event: PlanningEvent) -> PlanningEvent:
         with self._lock:
             self.validate_planning_event(event)
+            self._require_task_or_calendar_event(event)
             stored = event.model_copy(deep=True)
             self._tasks = self._apply_task_event(self._tasks, stored)
             self._planning_events.append(stored)
@@ -292,6 +293,69 @@ class PlanningState:
             self._scheduled_tasks = self._copies(result.scheduled_tasks)
             self._planning_events.append(event.model_copy(deep=True))
             return result
+
+    @staticmethod
+    def _require_task_or_calendar_event(event: PlanningEvent) -> None:
+        if event.event_type in {PlanningEventType.NEW_ASSESSMENT,
+                                PlanningEventType.ASSESSMENT_UPDATED}:
+            raise ValueError("assessment events require /assessment-changes with an assessment payload")
+
+    def change_assessment(self, event: PlanningEvent, assessment: Assessment,
+                          pipeline: "PlanningPipeline") -> "SchedulingResult":
+        from .assessment_changes import AssessmentConflictError, reconcile
+        with self._lock:
+            if any(e.id == event.id for e in self._planning_events):
+                raise DuplicatePlanningEventError(f"planning event id already exists: {event.id}")
+            previous = next((a for a in self._assessments if a.id == assessment.id), None)
+            if event.event_type is PlanningEventType.NEW_ASSESSMENT and previous:
+                raise AssessmentConflictError("assessment id already exists")
+            if event.event_type is PlanningEventType.ASSESSMENT_UPDATED and previous is None:
+                raise UnknownPlanningEventReferenceError("assessment id does not exist")
+            requirement_fields = ("title", "description", "type", "course_code", "is_group", "group_size")
+            if previous is None or any(getattr(previous, f) != getattr(assessment, f)
+                                       for f in requirement_fields):
+                try:
+                    assessment = Assessment.model_validate({**assessment.model_dump(),
+                        "type": pipeline.agent.classify_assessment(assessment.model_copy(deep=True))})
+                except ValueError as error:
+                    raise PlanningStateValidationError("invalid assessment classification") from error
+            assessments = [a for a in self.list_assessments() if a.id != assessment.id]
+            assessments.append(assessment.model_copy(deep=True))
+            tasks = reconcile(assessment, previous, self.list_tasks(),
+                              self.list_scheduled_tasks(), self.list_planning_events(), event, pipeline)
+            ids = {t.id for t in tasks}
+            schedule = [s for s in self.list_scheduled_tasks() if s.task_id in ids]
+            events = [*self.list_planning_events(), event.model_copy(deep=True)]
+            validate_planning_state(assessments, tasks, self._calendar_blocks, schedule, events)
+            affected = pipeline.agent.find_affected_task_ids(event.model_copy(deep=True), self._copies(tasks))
+            # Include previously unplaced work so partial successes never silently disappear.
+            affected |= {t.id for t in tasks if t.status is not TaskStatus.COMPLETED
+                         and t.id not in {s.task_id for s in schedule}}
+            result = pipeline.scheduler.reschedule_tasks(
+                self._copies(assessments), self._copies(tasks), self.list_calendar_blocks(),
+                self._copies(schedule), affected, replanning_start=event.timestamp,
+                preserve_valid_affected=True,
+            )
+            from backend.schemas import Flexibility
+            completed = {t.id for t in tasks if t.status is TaskStatus.COMPLETED}
+            for placement in schedule:
+                if (placement.task_id in completed or placement.flexibility is Flexibility.HARD):
+                    if placement not in result.scheduled_tasks:
+                        raise PlanningStateValidationError("scheduler changed protected history")
+            self._validate_replanning_result(tasks, result)
+            tasks = self._apply_schedule_status(tasks, result.scheduled_tasks)
+            self.reset(assessments, tasks, self._calendar_blocks, result.scheduled_tasks, events)
+            return result
+
+    def generate_plan(self, pipeline: "PlanningPipeline") -> "SchedulingResult":
+        with self._lock:
+            run = pipeline.run_plan(self.list_assessments(), self.list_calendar_blocks(),
+                                    self.list_scheduled_tasks())
+            validate_planning_state(run.assessments, run.tasks, self._calendar_blocks,
+                                    run.result.scheduled_tasks, self._planning_events)
+            self._validate_replanning_result(run.tasks, run.result)
+            self.replace_plan(run.assessments, run.tasks, run.result.scheduled_tasks)
+            return run.result
 
     def validate_planning_event(self, event: PlanningEvent) -> None:
         """Check an event without mutating state, for transactional workflows."""
