@@ -201,13 +201,31 @@ tasks. Failure details should remain visible until the next planning action;
 
 `frontend/src/api.ts` exports `replan`, `changeCalendar`, `compareSchedules`,
 and `ApiError` (`status`, `code`, `message`). `getDashboardData` also includes
-`calendarBlocks`. These functions are ready for D to wire into UI actions;
-the completed/missed buttons and calendar form are not implemented here.
+`calendarBlocks`. D has wired these functions into the completed/missed buttons
+and calendar form; see the browser acceptance notes in the handoff document.
 
 See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for ownership, common test inputs,
 expected times, and the reproducible verification command.
 
 ## Runtime modes
+
+### Assessment-event limitation (September 4)
+
+`new_assessment` and `assessment_updated` are valid event types, but a bare
+event supplies only a reference ID, not an assessment payload or requirement
+diff. The assessment must already exist for reference validation to succeed.
+Neither `/planning-events` nor `/replan` inserts or updates an Assessment or
+decomposes new tasks. In particular, an existing assessment with no tasks can
+yield an empty successful replan; this is not proof of successful ingestion.
+
+A has verified a composition of existing methods in which C stages a normalized
+Assessment and generated canonical Task[] before replanning. No assessment-write
+endpoint or automatic task-replacement transaction is introduced in this work.
+See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for prerequisites and preservation
+rules. Agent decision/fallback reasons remain backend logs; neither
+`PlanningEvent` nor `SchedulingResult` exposes them to the frontend.
+
+### Existing runtime behavior
 
 `backend.main:app` is the provider-backed dynamic demo runtime. It normalizes
 provider-shaped mocks into canonical assessments and calendar blocks, starts

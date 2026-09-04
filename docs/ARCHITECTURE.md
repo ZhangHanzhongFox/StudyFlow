@@ -114,6 +114,20 @@ using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
+The Agent revalidates provider model instances (including nested drafts) before
+building canonical tasks. Invalid fields, numeric coercions, empty outputs and
+invalid dependency graphs trigger a complete deterministic fallback. Templates
+use generic preparation defaults, not invented assessment requirements; task
+durations remain estimates. Decision reasons and dependency witness paths are
+backend logs, not fields added to the domain models or HTTP responses.
+
+Assessment events currently select incomplete work already present in the
+supplied task collection. They do not ingest assessment payloads, compare old
+and new requirements, or regenerate tasks inside `replan()`. The verified
+composition of existing Agent methods, the conservative replacement policy,
+and the remaining C/D integration gates are documented in the September 4 A
+section of [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md).
+
 `StudyScheduler` implements the stable `Scheduler` protocol and is injected by
 C through `PlanningPipeline`. It respects assessment unlock times and
 deadlines, dependency order, duration, priority, and hard calendar blocks;

@@ -103,7 +103,7 @@ def test_exam_uses_the_exam_midterm_workflow_family() -> None:
     tasks = StudyFlowAgent().decompose_assessment(exam)
 
     assert len(tasks) == 4
-    assert tasks[0].name == "Review the assessment scope and learning outcomes"
+    assert tasks[0].name == "Confirm assessment scope and learning outcomes"
     assert tasks[-1].name == "Complete a final review of weak topics"
     assert [task.duration_minutes for task in tasks] == [30, 120, 180, 60]
     assert tasks[0].dependencies == []
@@ -121,11 +121,11 @@ def test_presentation_template_has_required_dependency_chain() -> None:
     tasks = StudyFlowAgent().decompose_assessment(presentation)
 
     assert [task.name for task in tasks] == [
-        "Extract presentation requirements and assign roles",
+        "Confirm presentation requirements, missing details and group roles",
         "Create the presentation storyline and outline",
-        "Build and review the presentation slides",
-        "Write speaker notes and demo script",
-        "Run a timed group rehearsal",
+        "Prepare and review presentation materials",
+        "Write and review speaker notes",
+        "Run a timed group rehearsal and revise",
     ]
     assert [task.duration_minutes for task in tasks] == [30, 30, 60, 90, 60]
     assert tasks[0].dependencies == []
@@ -403,8 +403,8 @@ def test_llm_failures_and_invalid_graphs_use_complete_fallback(
     tasks = agent.decompose_assessment(presentation)
 
     assert len(tasks) == 5
-    assert tasks[0].name == "Extract presentation requirements and assign roles"
-    assert tasks[-1].name == "Run a timed group rehearsal"
+    assert tasks[0].name == "Confirm presentation requirements, missing details and group roles"
+    assert tasks[-1].name == "Run a timed group rehearsal and revise"
     assert validate_task_graph(tasks) == tasks
 
 
