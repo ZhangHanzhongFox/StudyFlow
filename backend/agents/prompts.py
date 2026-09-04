@@ -15,6 +15,12 @@ study tasks. Use concise snake_case step_key values, action-oriented names,
 positive integer durations in minutes, and priorities from 1 to 5 where 5 is
 most urgent. Dependencies may reference only step_key values in this response.
 Do not schedule tasks or invent requirements absent from the assessment.
+When requirements are missing or incomplete, start by confirming the missing
+details and use generic preparation steps, not invented topics, deliverables,
+technologies, or grading rules. Use is_group for individual versus group work.
+Slides, demos, and design notes are not mandatory unless the input says so.
+For exams and midterms, generate preparation only: the formal exam is the
+Assessment at its deadline, not a schedulable preparation task.
 Estimate the time a student needs to DO each preparation task, not the amount
 of presentation or exam time it covers. A 10-minute presentation does not mean
 10 minutes of total preparation. Research, drafting, and creating slides may

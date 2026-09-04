@@ -219,11 +219,11 @@ block ID, and the block must have a valid timezone-aware time range. Invalid
 wrappers return standard FastAPI 422 validation details.
 
 The backend stages the new calendar before reference validation and planning,
-so a new block does not have to exist in the old state. Calendar events set
-`preserve_valid_affected=True` on the Scheduler: A may return all incomplete
-tasks for consideration, while B keeps valid placements and moves conflicting
-work and necessary dependents. Hard placements and completed history are
-immutable. A change that would overlap them is rejected with 422
+so a new block does not have to exist in the old state. Calendar, new-assessment,
+and assessment-update events set `preserve_valid_affected=True` on the Scheduler:
+A may return a broad incomplete candidate set, while B keeps valid placements
+and moves conflicting work and necessary dependents. Hard placements and
+completed history are immutable. A change that would overlap them is rejected with 422
 `invalid_replanning_input`, with no calendar or event mutation.
 Likewise, a missed task with a hard placement cannot be moved automatically;
 the request is rejected rather than falsely reporting a successful recovery.
@@ -261,8 +261,9 @@ planning and commit under the state lock. Separate GET requests are not a
 versioned snapshot across concurrent users. Automatic polling, persistent
 storage, and multi-user isolation are outside this contract.
 
-D saves the old schedule before submitting, compares by `task_id` and absolute
-start/end times, and shows added/moved/removed tasks plus failure messages.
+D saves the old schedule before submitting, compares by `task_id`, absolute
+start/end times, and `flexibility`, and shows added/moved/preserved/removed
+tasks plus failure messages. A changed placement `id` alone is not a move.
 After success, refresh `/tasks`, `/schedule`, `/planning-events`, and
 `/calendar-blocks`. Do not call `/plan` to refresh: that route regenerates
 tasks. Failure details should remain visible until the next planning action;
@@ -272,11 +273,31 @@ tasks. Failure details should remain visible until the next planning action;
 and `ApiError` (`status`, `code`, `message`). `getDashboardData` also includes
 `calendarBlocks`. The completed/missed buttons and calendar form are connected.
 The new reset and assessment client functions still require D's UI controls.
+See the browser acceptance notes in the handoff document.
 
 See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for ownership, common test inputs,
 expected times, and the reproducible verification command.
 
 ## Runtime modes
+
+### Assessment-event limitation (September 4)
+
+`new_assessment` and `assessment_updated` are valid event types, but a bare
+event supplies only a reference ID, not an assessment payload or requirement
+diff. The HTTP endpoints `/planning-events` and `/replan` reject these bare
+events with 422; use `/assessment-changes` for entity changes. Unknown references
+retain the `unknown_reference` error. Internal `PlanningState.replan` remains
+available to A/B callers that have already staged canonical entities and tasks;
+that internal operation does not itself perform ingestion.
+
+A has verified a composition of existing methods in which C stages a normalized
+Assessment and generated canonical Task[] before replanning. C now supplies
+the atomic assessment-write endpoint described above, using those same methods.
+See [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for prerequisites and preservation
+rules. Agent decision/fallback reasons remain backend logs; neither
+`PlanningEvent` nor `SchedulingResult` exposes them to the frontend.
+
+### Existing runtime behavior
 
 `backend.main:app` is the provider-backed dynamic demo runtime. It normalizes
 provider-shaped mocks into canonical assessments and calendar blocks, starts

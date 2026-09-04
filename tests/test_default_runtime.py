@@ -145,12 +145,17 @@ def test_default_replan_commits_event_and_keeps_state_consistent() -> None:
     app = create_app(clock=fixed_clock)
     request(app, "POST", "/plan")
     tasks = request(app, "GET", "/tasks").json()
-    slides = next(task for task in tasks if "slides" in task["name"].lower())
+    # Task names are presentation copy, not stable identifiers. Choose an
+    # actual dependency-bearing, non-leaf task from the generated graph.
+    referenced_task = next(
+        task for task in tasks if task["dependencies"]
+        and any(task["id"] in child["dependencies"] for child in tasks)
+    )
     event = {
         "id": "event-default-runtime-missed-slides",
         "event_type": "task_missed",
         "timestamp": "2026-09-04T12:10:00+08:00",
-        "reference_id": slides["id"],
+        "reference_id": referenced_task["id"],
     }
 
     response = request(app, "POST", "/replan", json=event)

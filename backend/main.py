@@ -246,6 +246,9 @@ def create_app(
             )
 
         try:
+            if calendar_block is None:
+                selected_store.validate_planning_event(event)
+                selected_store._require_task_or_calendar_event(event)
             return selected_store.replan(
                 event, selected_pipeline, calendar_block,
             )

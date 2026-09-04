@@ -261,7 +261,6 @@ class PlanningState:
         explicit unscheduled tasks are normal results and are committed.
         """
 
-        self._require_task_or_calendar_event(event)
         with self._lock:
             if any(item.id == event.id for item in self._planning_events):
                 raise DuplicatePlanningEventError(

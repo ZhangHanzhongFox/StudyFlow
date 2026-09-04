@@ -85,9 +85,10 @@ published on exceptions. `/replan` takes a bare event; `/calendar-changes`
 takes the `CalendarChangeRequest` wrapper, without changing domain fields.
 
 The pipeline passes `event.timestamp` as `replanning_start` to the Scheduler.
-For calendar events it also sets `preserve_valid_affected=True`; A's broad
-candidate set does not force all valid tasks to move. B checks actual time
-constraints and propagates necessary dependency moves. See
+For calendar, new-assessment, and assessment-update events it also sets
+`preserve_valid_affected=True`; A's broad candidate set does not force all
+valid tasks to move. B checks actual time constraints and propagates necessary
+dependency moves. See
 [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for the implemented shared baseline.
 
 ## Stable Python interfaces
@@ -122,6 +123,20 @@ The Agent / Workflow implementation can classify and decompose assessments
 using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
+
+The Agent revalidates provider model instances (including nested drafts) before
+building canonical tasks. Invalid fields, numeric coercions, empty outputs and
+invalid dependency graphs trigger a complete deterministic fallback. Templates
+use generic preparation defaults, not invented assessment requirements; task
+durations remain estimates. Decision reasons and dependency witness paths are
+backend logs, not fields added to the domain models or HTTP responses.
+
+Assessment events currently select incomplete work already present in the
+supplied task collection. They do not ingest assessment payloads, compare old
+and new requirements, or regenerate tasks inside `replan()`. The verified
+composition of existing Agent methods, the conservative replacement policy,
+and the remaining C/D integration gates are documented in the September 4 A
+section of [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md).
 
 `StudyScheduler` implements the stable `Scheduler` protocol and is injected by
 C through `PlanningPipeline`. It respects assessment unlock times and

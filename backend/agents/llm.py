@@ -29,8 +29,8 @@ class TaskDraft(BaseModel):
 
     step_key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     name: NonEmptyStr
-    duration_minutes: int = Field(gt=0)
-    priority: int = Field(ge=1, le=5)
+    duration_minutes: int = Field(gt=0, strict=True)
+    priority: int = Field(ge=1, le=5, strict=True)
     dependency_keys: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
