@@ -1,9 +1,7 @@
 """Provider-neutral structured LLM boundary used by the agent workflow.
 
-The MVP ships with a deterministic fake implementation so the full agent path
-can be developed and tested without network access or API credentials. A real
-provider adapter can implement :class:`StructuredLLM` later without changing
-the workflow service.
+The fake implementation supports offline tests. The Bedrock adapter implements
+the same protocol without changing the workflow service or canonical schemas.
 """
 
 from collections.abc import Iterable, Mapping
@@ -31,8 +29,8 @@ class TaskDraft(BaseModel):
 
     step_key: str = Field(pattern=r"^[a-z][a-z0-9_]{0,63}$")
     name: NonEmptyStr
-    duration_minutes: int = Field(gt=0)
-    priority: int = Field(ge=1, le=5)
+    duration_minutes: int = Field(gt=0, strict=True)
+    priority: int = Field(ge=1, le=5, strict=True)
     dependency_keys: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")

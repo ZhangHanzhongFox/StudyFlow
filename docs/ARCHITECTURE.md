@@ -78,6 +78,19 @@ B must return an `UnscheduledTask` with a machine-readable reason when a task
 cannot be placed. It must not silently drop work. A may then decide whether to
 decompose differently, adjust estimates, or ask the user for a decision.
 
+Observation writes now use `PlanningState.replan`: under one state lock, C
+stages task status and an optional calendar upsert, runs A/B, validates the
+result, then commits tasks, calendar, schedule and event together. No state is
+published on exceptions. `/replan` takes a bare event; `/calendar-changes`
+takes the `CalendarChangeRequest` wrapper, without changing domain fields.
+
+The pipeline passes `event.timestamp` as `replanning_start` to the Scheduler.
+For calendar, new-assessment, and assessment-update events it also sets
+`preserve_valid_affected=True`; A's broad candidate set does not force all
+valid tasks to move. B checks actual time constraints and propagates necessary
+dependency moves. See
+[REPLAN_HANDOFF.md](REPLAN_HANDOFF.md) for the implemented shared baseline.
+
 ## Stable Python interfaces
 
 - `AgentWorkflow` in `backend/agents/contracts.py`
@@ -96,15 +109,60 @@ boundaries while parallel development is underway.
 
 ## Current runtime state
 
+September 4: `PlanningState.change_assessment()` stages the entity and reconciles
+tasks via the existing Agent methods, then invokes the existing Scheduler and
+commits all artifacts under the state lock. Timing-only updates preserve task
+identity. Requirement changes retain completed history; unsafe observed-task
+removal is an explicit conflict. No new Agent/Scheduler protocol is required.
+`generate_plan()` now holds the same lock as observations and reset. The
+environment-gated `/demo/reset` restores the complete validated startup snapshot,
+including events, independently of regeneration. HTTP wrappers and frontend
+integration rules are documented in API_CONTRACT and REPLAN_HANDOFF.
+
 The Agent / Workflow implementation can classify and decompose assessments
 using a provider-neutral structured-output boundary, a credential-free fake,
 and deterministic templates. Its canonical task outputs and affected-task
 analysis are ready to inject through `PlanningPipeline`.
 
-The FastAPI app currently exposes the validated shared mock data. `POST /plan`
-returns the baseline mock schedule so the frontend can integrate immediately.
-`POST /replan` intentionally returns HTTP 501 until the Agent and Scheduler are
-both injected through `PlanningPipeline`.
+The Agent revalidates provider model instances (including nested drafts) before
+building canonical tasks. Invalid fields, numeric coercions, empty outputs and
+invalid dependency graphs trigger a complete deterministic fallback. Templates
+use generic preparation defaults, not invented assessment requirements; task
+durations remain estimates. Decision reasons and dependency witness paths are
+backend logs, not fields added to the domain models or HTTP responses.
 
-No endpoint currently writes to fixture files. New planning events are held in
-memory and reset when the process restarts.
+Assessment events currently select incomplete work already present in the
+supplied task collection. They do not ingest assessment payloads, compare old
+and new requirements, or regenerate tasks inside `replan()`. The verified
+composition of existing Agent methods, the conservative replacement policy,
+and the remaining C/D integration gates are documented in the September 4 A
+section of [REPLAN_HANDOFF.md](REPLAN_HANDOFF.md).
+
+`StudyScheduler` implements the stable `Scheduler` protocol and is injected by
+C through `PlanningPipeline`. It respects assessment unlock times and
+deadlines, dependency order, duration, priority, and hard calendar blocks;
+work that cannot fit is returned explicitly as `UnscheduledTask`.
+
+The exported FastAPI app normalizes provider-shaped mock data and injects the
+real `StudyFlowAgent` and `StudyScheduler` through `PlanningPipeline`.
+`POST /plan` generates canonical tasks and a dynamic schedule, then atomically
+publishes both through the planning state. `GET /tasks` and `GET /schedule`
+therefore always reflect the latest successful run.
+
+The default runtime injects a Singapore-time clock into `StudyScheduler`.
+Each scheduling call reads it after decomposition and rounds up to a whole
+minute, so an old mock calendar or previous plan cannot place new work before
+the current time. It does not freeze the clock at application startup.
+Tests can supply `create_app(clock=...)`; an explicit scheduler `planning_start`
+takes precedence for fixed-date demos. Replan still uses the event timestamp
+and preserves completed work and unaffected valid placements.
+
+Canvas and Google Calendar-shaped mocks are normalized at
+`backend/integrations/` and can populate the same canonical demo state without
+changing stable IDs. `PlanningState` holds assessments, tasks, calendar blocks,
+schedule entries, and events in process memory with atomic reference
+validation. No endpoint writes to fixture files.
+
+`create_app()` still accepts an explicit store and optional pipeline for tests.
+Passing a store without a pipeline retains the stable fixture `/plan` and
+explicit `/replan` 501 behavior, without changing the public API shape.

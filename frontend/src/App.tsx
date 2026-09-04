@@ -1,18 +1,36 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   BookOpen,
+  CalendarPlus,
   CalendarDays,
   CheckCircle2,
   Clock3,
   Code2,
   Presentation,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   TriangleAlert,
+  WandSparkles,
+  XCircle,
 } from "lucide-react";
-import { getDashboardData } from "./api";
-import type { Assessment, PlanningEvent, ScheduledTask } from "./types";
+import {
+  ApiError,
+  changeCalendar,
+  compareSchedules,
+  generatePlan,
+  getDashboardData,
+  replan,
+} from "./api";
+import type {
+  Assessment,
+  CalendarChangeRequest,
+  PlanningEvent,
+  ScheduledTask,
+  SchedulingResult,
+  Task,
+} from "./types";
 
 type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
 
@@ -24,12 +42,12 @@ const typeLabels: Record<Assessment["type"], string> = {
   quiz: "Quiz",
 };
 
-const eventCopy: Record<PlanningEvent["event_type"], { label: string; detail: string }> = {
-  task_completed: { label: "Task completed", detail: "Progress observed and plan updated" },
-  task_missed: { label: "Task missed", detail: "Schedule impact detected" },
-  new_assessment: { label: "Assessment added", detail: "New deadline entered the plan" },
-  assessment_updated: { label: "Assessment updated", detail: "Requirements were reviewed" },
-  calendar_changed: { label: "Calendar changed", detail: "Availability was re-evaluated" },
+const eventLabels: Record<PlanningEvent["event_type"], string> = {
+  task_completed: "Task completed",
+  task_missed: "Task missed",
+  new_assessment: "Assessment added",
+  assessment_updated: "Assessment updated",
+  calendar_changed: "Calendar changed",
 };
 
 function sameLocalDay(left: Date, right: Date) {
@@ -46,14 +64,6 @@ function relativeDeadline(deadline: string, now: Date) {
   return `${days} days left`;
 }
 
-function readableTaskId(taskId: string) {
-  return taskId
-    .replace(/^task-/, "")
-    .split("-")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
-}
-
 function formatTime(value: string) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(value));
 }
@@ -62,6 +72,42 @@ function formatEventTime(value: string, now: Date) {
   const date = new Date(value);
   if (sameLocalDay(date, now)) return `Today, ${formatTime(value)}`;
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function formatScheduleDateTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(value));
+}
+
+function eventId(prefix: string) {
+  const unique = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `event-${prefix}-${unique}`;
+}
+
+function calendarId() {
+  const unique = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `calendar-${unique}`;
+}
+
+function apiErrorMessage(reason: unknown) {
+  if (reason instanceof ApiError) return `${reason.message} (${reason.code})`;
+  return "The API could not be reached. The change may have been saved; retry to check its status.";
+}
+
+type OperationState = "idle" | "loading" | "success" | "error" | "refresh_error";
+
+interface ScheduleChanges {
+  added: ScheduledTask[];
+  removed: ScheduledTask[];
+  preserved: ScheduledTask[];
+  moved: Array<{ before: ScheduledTask; after: ScheduledTask }>;
+  trigger: string;
 }
 
 function TypeIcon({ type }: { type: Assessment["type"] }) {
@@ -97,7 +143,37 @@ export default function App() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [planState, setPlanState] = useState<OperationState>("idle");
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [planResult, setPlanResult] = useState<SchedulingResult | null>(null);
+  const [changeSummary, setChangeSummary] = useState<string | null>(null);
+  const [operationState, setOperationState] = useState<OperationState>("idle");
+  const [operationMessage, setOperationMessage] = useState<string | null>(null);
+  const [operationResult, setOperationResult] = useState<SchedulingResult | null>(null);
+  const [scheduleChanges, setScheduleChanges] = useState<ScheduleChanges | null>(null);
+  const [pendingRefresh, setPendingRefresh] = useState<{
+    result: SchedulingResult;
+    before: ScheduledTask[];
+    trigger: string;
+  } | null>(null);
+  const [pendingPlanRefresh, setPendingPlanRefresh] = useState<{
+    result: SchedulingResult;
+    before: ScheduledTask[];
+  } | null>(null);
+  const [pendingAction, setPendingAction] = useState<{
+    request: PlanningEvent | CalendarChangeRequest;
+    trigger: string;
+    before: ScheduledTask[];
+  } | null>(null);
+  const [calendarSelection, setCalendarSelection] = useState("new");
+  const [calendarTitle, setCalendarTitle] = useState("");
+  const [calendarStart, setCalendarStart] = useState("");
+  const [calendarEnd, setCalendarEnd] = useState("");
+  const [calendarFlexibility, setCalendarFlexibility] = useState<"hard" | "soft" | "flexible">("hard");
+  // React state updates are asynchronous; the ref also blocks same-tick submissions.
+  const actionInFlight = useRef(false);
   const now = useMemo(() => new Date(), []);
+  const displayTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const load = useCallback(() => {
     const controller = new AbortController();
@@ -132,6 +208,271 @@ export default function App() {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()),
     [data],
   );
+  const tasksById = useMemo(
+    () => new Map((data?.tasks ?? []).map((task) => [task.id, task])),
+    [data],
+  );
+  const operationLoading = operationState === "loading";
+  const isBusy = loading || planState === "loading" || operationLoading;
+  const writesDisabled = isBusy || Boolean(error) || Boolean(pendingRefresh) || Boolean(pendingPlanRefresh);
+
+  const eventReference = (event: PlanningEvent) => {
+    if (event.event_type === "task_completed" || event.event_type === "task_missed") {
+      return tasksById.get(event.reference_id)?.name ?? event.reference_id;
+    }
+    if (event.event_type === "calendar_changed") {
+      return data?.calendarBlocks.find((block) => block.id === event.reference_id)?.title ?? event.reference_id;
+    }
+    return data?.assessments.find((assessment) => assessment.id === event.reference_id)?.title ?? event.reference_id;
+  };
+
+  const applyPlanningResult = useCallback(async (
+    result: SchedulingResult,
+    before: ScheduledTask[],
+    trigger: string,
+  ) => {
+    // Called only after a confirmed write, including the original-event retry.
+    setPlanResult(null);
+    setPlanState("idle");
+    setChangeSummary(null);
+    try {
+      const controller = new AbortController();
+      const refreshed = await getDashboardData(controller.signal);
+      const comparison = compareSchedules(before, result.scheduled_tasks);
+      const previousByTask = new Map(before.map((item) => [item.task_id, item]));
+
+      setData(refreshed);
+      setOperationResult(result);
+      setScheduleChanges({
+        ...comparison,
+        moved: comparison.moved.flatMap((after) => {
+          const previous = previousByTask.get(after.task_id);
+          return previous ? [{ before: previous, after }] : [];
+        }),
+        trigger,
+      });
+      setOperationMessage(
+        `${comparison.moved.length} moved/updated · ${comparison.added.length} added · ${comparison.removed.length} removed · ${comparison.preserved.length} preserved`,
+      );
+      setPendingRefresh(null);
+      setPendingAction(null);
+      setOperationState("success");
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setOperationResult(result);
+      setPendingRefresh({ result, before, trigger });
+      setOperationMessage("The change was saved, but the latest dashboard state could not be refreshed.");
+      setOperationState("refresh_error");
+    }
+  }, []);
+
+  const submitPlanningAction = useCallback(async (
+    request: PlanningEvent | CalendarChangeRequest,
+    trigger: string,
+  ) => {
+    if (!data || writesDisabled || actionInFlight.current) return;
+    actionInFlight.current = true;
+
+    const before = data.schedule;
+    const controller = new AbortController();
+    setOperationState("loading");
+    setOperationMessage(trigger);
+    setPendingRefresh(null);
+    setPendingAction({ request, trigger, before });
+
+    try {
+      const result = "calendar_block" in request
+        ? await changeCalendar(request, controller.signal)
+        : await replan(request, controller.signal);
+      await applyPlanningResult(result, before, trigger);
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setOperationMessage(apiErrorMessage(reason));
+      setOperationState("error");
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyPlanningResult, data, writesDisabled]);
+
+  const retryPendingRefresh = useCallback(async () => {
+    if (!pendingRefresh || isBusy || actionInFlight.current) return;
+    actionInFlight.current = true;
+    setOperationState("loading");
+    try {
+      await applyPlanningResult(pendingRefresh.result, pendingRefresh.before, pendingRefresh.trigger);
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyPlanningResult, isBusy, pendingRefresh]);
+
+  const retryPendingAction = useCallback(async () => {
+    if (!pendingAction || writesDisabled || actionInFlight.current) return;
+    actionInFlight.current = true;
+    const controller = new AbortController();
+    const submittedEvent = "calendar_block" in pendingAction.request
+      ? pendingAction.request.event
+      : pendingAction.request;
+    setOperationState("loading");
+    setOperationMessage("Checking whether the previous submission was already saved…");
+
+    try {
+      const refreshed = await getDashboardData(controller.signal);
+      const alreadySaved = refreshed.planningEvents.some((event) => event.id === submittedEvent.id);
+      if (!alreadySaved) {
+        const result = "calendar_block" in pendingAction.request
+          ? await changeCalendar(pendingAction.request, controller.signal)
+          : await replan(pendingAction.request, controller.signal);
+        await applyPlanningResult(result, pendingAction.before, pendingAction.trigger);
+        return;
+      }
+
+      const comparison = compareSchedules(pendingAction.before, refreshed.schedule);
+      const previousByTask = new Map(pendingAction.before.map((item) => [item.task_id, item]));
+      setData(refreshed);
+      setScheduleChanges({
+        ...comparison,
+        moved: comparison.moved.flatMap((after) => {
+          const previous = previousByTask.get(after.task_id);
+          return previous ? [{ before: previous, after }] : [];
+        }),
+        trigger: pendingAction.trigger,
+      });
+      setOperationResult(null);
+      setPlanResult(null);
+      setPlanState("idle");
+      setChangeSummary(null);
+      setOperationMessage("The original action was already saved; the dashboard is now refreshed. Its one-time unscheduled result is no longer available.");
+      setPendingAction(null);
+      setOperationState("success");
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setOperationMessage(`${apiErrorMessage(reason)} Retry to check the original event before submitting again.`);
+      setOperationState("error");
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyPlanningResult, pendingAction, writesDisabled]);
+
+  const handleTaskAction = useCallback((task: Task, action: "task_completed" | "task_missed") => {
+    const event: PlanningEvent = {
+      id: eventId(action === "task_missed" ? "task-missed" : "task-completed"),
+      event_type: action,
+      timestamp: new Date().toISOString(),
+      reference_id: task.id,
+    };
+    void submitPlanningAction(
+      event,
+      action === "task_missed" ? `${task.name} was marked missed` : `${task.name} was completed`,
+    );
+  }, [submitPlanningAction]);
+
+  const handleCalendarSelection = useCallback((value: string) => {
+    setCalendarSelection(value);
+    const block = data?.calendarBlocks.find((item) => item.id === value);
+    if (!block) {
+      setCalendarTitle("");
+      setCalendarStart("");
+      setCalendarEnd("");
+      setCalendarFlexibility("hard");
+      return;
+    }
+    const toLocalInput = (iso: string) => {
+      const date = new Date(iso);
+      const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+      return local.toISOString().slice(0, 16);
+    };
+    setCalendarTitle(block.title);
+    setCalendarStart(toLocalInput(block.start_time));
+    setCalendarEnd(toLocalInput(block.end_time));
+    setCalendarFlexibility(block.flexibility);
+  }, [data]);
+
+  const handleCalendarSubmit = useCallback((formEvent: React.FormEvent) => {
+    formEvent.preventDefault();
+    if (!calendarTitle.trim() || !calendarStart || !calendarEnd) return;
+
+    const blockId = calendarSelection === "new" ? calendarId() : calendarSelection;
+    const event: PlanningEvent & { event_type: "calendar_changed" } = {
+      id: eventId("calendar-changed"),
+      event_type: "calendar_changed",
+      timestamp: new Date().toISOString(),
+      reference_id: blockId,
+    };
+    const change: CalendarChangeRequest = {
+      event,
+      calendar_block: {
+        id: blockId,
+        title: calendarTitle.trim(),
+        start_time: new Date(calendarStart).toISOString(),
+        end_time: new Date(calendarEnd).toISOString(),
+        flexibility: calendarFlexibility,
+      },
+    };
+    void submitPlanningAction(change, `${calendarTitle.trim()} changed the calendar`);
+  }, [calendarEnd, calendarFlexibility, calendarSelection, calendarStart, calendarTitle, submitPlanningAction]);
+
+  const applyGeneratedPlan = useCallback(async (result: SchedulingResult, before: ScheduledTask[]) => {
+    try {
+      const controller = new AbortController();
+      const refreshed = await getDashboardData(controller.signal);
+      const comparison = compareSchedules(before, refreshed.schedule);
+
+      setData(refreshed);
+      setPlanResult(result);
+      setChangeSummary(
+        `${refreshed.schedule.length} scheduled · ${comparison.added.length} added · ${comparison.moved.length} moved · ${comparison.removed.length} removed`,
+      );
+      setPendingPlanRefresh(null);
+      setPlanState("success");
+    } catch {
+      setPendingPlanRefresh({ result, before });
+      setPlanError("The new plan was saved, but the dashboard could not be refreshed. Retry refresh to load it without generating again.");
+      setPlanState("refresh_error");
+    }
+  }, []);
+
+  const retryPlanRefresh = useCallback(async () => {
+    if (!pendingPlanRefresh || isBusy || actionInFlight.current) return;
+    actionInFlight.current = true;
+    setPlanState("loading");
+    try {
+      await applyGeneratedPlan(pendingPlanRefresh.result, pendingPlanRefresh.before);
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyGeneratedPlan, isBusy, pendingPlanRefresh]);
+
+  const handleGeneratePlan = useCallback(async () => {
+    if (!data || writesDisabled || actionInFlight.current) return;
+    if ((data.tasks.length > 0 || data.schedule.length > 0) && !window.confirm(
+      "Regenerate plan? This will replace your tasks and schedule and reset task progress, including completed work.",
+    )) return;
+    actionInFlight.current = true;
+    const controller = new AbortController();
+    setPlanState("loading");
+    setPlanError(null);
+
+    try {
+      const result = await generatePlan(controller.signal);
+      // Results and recovery actions from the old plan no longer apply.
+      setPlanResult(null);
+      setOperationState("idle");
+      setOperationMessage(null);
+      setOperationResult(null);
+      setScheduleChanges(null);
+      setPendingAction(null);
+      setPendingRefresh(null);
+      await applyGeneratedPlan(result, data.schedule);
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setPlanError(reason instanceof ApiError
+        ? apiErrorMessage(reason)
+        : "StudyFlow couldn’t confirm that the plan was generated. Check the API before retrying; another generation will reset task progress.");
+      setPlanState("error");
+    } finally {
+      actionInFlight.current = false;
+    }
+  }, [applyGeneratedPlan, data, writesDisabled]);
 
   return (
     <div className="app-shell">
@@ -149,12 +490,151 @@ export default function App() {
             <p className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(now)} · Your adaptive study workspace</p>
             <h1>Your study day, made clear.</h1>
             <p>Your plan is balanced. Here’s what the agent is watching today.</p>
+            <p className="display-timezone">All times displayed in {displayTimezone} (browser timezone).</p>
           </div>
-          <div className="loop-card" aria-label="StudyFlow agent loop">
-            <span>Plan</span><ArrowRight size={14} /><span>Act</span><ArrowRight size={14} />
-            <span>Observe</span><ArrowRight size={14} /><strong>Replan</strong>
+          <div className="intro-actions">
+            <div className="loop-card" aria-label="StudyFlow agent loop">
+              <span>Plan</span><ArrowRight size={14} /><span>Act</span><ArrowRight size={14} />
+              <span>Observe</span><ArrowRight size={14} /><strong>Replan</strong>
+            </div>
+            <button
+              className="generate-button"
+              type="button"
+              onClick={handleGeneratePlan}
+              disabled={writesDisabled}
+            >
+              {planState === "loading" ? <RefreshCw className="spin" size={16} /> : <WandSparkles size={16} />}
+              {planState === "loading" ? (pendingPlanRefresh ? "Refreshing…" : "Generating…") : data && (data.tasks.length > 0 || data.schedule.length > 0) ? "Regenerate Plan" : "Generate Plan"}
+            </button>
           </div>
         </div>
+
+        <section className={`change-notice ${planState}`} aria-live="polite">
+          <span className="change-notice-icon">
+            {planState === "error" || planState === "refresh_error" ? <TriangleAlert size={18} /> : planState === "loading" ? <RefreshCw className="spin" size={18} /> : <RotateCcw size={18} />}
+          </span>
+          <div>
+            <strong>{planState === "success" ? "Plan updated" : planState === "refresh_error" ? "Plan saved — refresh needed" : planState === "error" ? "Plan update failed" : planState === "loading" ? (pendingPlanRefresh ? "Refreshing saved plan" : "Agent is generating your plan") : "Plan changes"}</strong>
+            <p>
+              {planState === "success" && changeSummary
+                ? changeSummary
+                : planState === "error" || planState === "refresh_error"
+                  ? planError
+                  : planState === "loading"
+                    ? (pendingPlanRefresh ? "Loading the saved tasks and schedule." : "Tasks, dependencies, and available time are being evaluated.")
+                    : "Generate a plan to see scheduled, moved, and unscheduled work here."}
+            </p>
+            {changeSummary && planState !== "success" && <p>Last saved plan: {changeSummary}</p>}
+          </div>
+          {planState === "error" && (
+            <button type="button" onClick={handleGeneratePlan} disabled={writesDisabled}><RefreshCw size={14} /> Retry</button>
+          )}
+          {planState === "refresh_error" && pendingPlanRefresh && (
+            <button type="button" onClick={() => void retryPlanRefresh()} disabled={isBusy}><RefreshCw size={14} /> Retry refresh</button>
+          )}
+        </section>
+
+        {data && (
+          <section className={`replan-notice ${operationState}`} aria-live="polite">
+            <div className="replan-notice-heading">
+              <span className="change-notice-icon">
+                {operationState === "loading" ? <RefreshCw className="spin" size={18} /> : operationState === "error" || operationState === "refresh_error" ? <TriangleAlert size={18} /> : <RotateCcw size={18} />}
+              </span>
+              <div>
+                <strong>{operationState === "loading" ? "Replanning…" : operationState === "success" ? "Replan complete" : operationState === "error" ? "Replan failed" : operationState === "refresh_error" ? "Saved — refresh needed" : "Replan activity"}</strong>
+                <p>{operationMessage ?? "Complete, miss, or change a calendar block to see exactly what moves."}</p>
+              </div>
+              {operationState === "refresh_error" && pendingRefresh && (
+                <button type="button" onClick={() => void retryPendingRefresh()} disabled={isBusy}>
+                  <RefreshCw size={14} /> Retry refresh
+                </button>
+              )}
+              {operationState === "error" && pendingAction && (
+                <button type="button" onClick={() => void retryPendingAction()} disabled={writesDisabled}>
+                  <RefreshCw size={14} /> Retry action
+                </button>
+              )}
+            </div>
+            {scheduleChanges && (
+              <div className="schedule-changes">
+                {operationState !== "success" && <p className="no-schedule-changes">Last saved comparison — the current action has not refreshed this result.</p>}
+                {scheduleChanges.moved.map(({ before, after }) => (
+                  <article key={`moved-${after.task_id}`}>
+                    <span className="change-kind">{Date.parse(before.start_time) === Date.parse(after.start_time) && Date.parse(before.end_time) === Date.parse(after.end_time) ? "Updated" : "Moved"}</span>
+                    <strong>{tasksById.get(after.task_id)?.name ?? "Task details unavailable"}</strong>
+                    <p><del>{formatScheduleDateTime(before.start_time)} – {formatScheduleDateTime(before.end_time)}</del><ArrowRight size={13} /><ins>{formatScheduleDateTime(after.start_time)} – {formatScheduleDateTime(after.end_time)}</ins></p>
+                    <small>Flexibility: {before.flexibility} → {after.flexibility}{before.flexibility !== after.flexibility ? " (updated)" : ""}</small>
+                    <small>Triggered by: {scheduleChanges.trigger}</small>
+                  </article>
+                ))}
+                {scheduleChanges.added.map((item) => (
+                  <article key={`added-${item.task_id}`}>
+                    <span className="change-kind added">Added</span>
+                    <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
+                    <p>{formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
+                  </article>
+                ))}
+                {scheduleChanges.removed.map((item) => (
+                  <article key={`removed-${item.task_id}`}>
+                    <span className="change-kind removed">Removed</span>
+                    <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
+                    <p>Previous slot: {formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
+                  </article>
+                ))}
+                {scheduleChanges.preserved.map((item) => (
+                  <article key={`preserved-${item.task_id}`}>
+                    <span className="change-kind preserved">Preserved</span>
+                    <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
+                    <p>{formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
+                    <small>Unchanged placement · {item.flexibility}</small>
+                    <span className="task-status">{tasksById.get(item.task_id)?.status.replaceAll("_", " ") ?? "Status unavailable"}</span>
+                  </article>
+                ))}
+                {scheduleChanges.moved.length === 0 && scheduleChanges.added.length === 0 && scheduleChanges.removed.length === 0 && (
+                  <p className="no-schedule-changes">No schedule slots needed to move. Task, calendar, and activity state were still refreshed.</p>
+                )}
+              </div>
+            )}
+            {operationResult && operationResult.unscheduled_tasks.length > 0 && (
+              <div className="operation-failures">
+                <strong><TriangleAlert size={15} /> {operationResult.unscheduled_tasks.length} task(s) could not be scheduled</strong>
+                {operationResult.unscheduled_tasks.map((failure) => (
+                  <article key={failure.task_id}>
+                    <b>{tasksById.get(failure.task_id)?.name ?? "Task details unavailable"}</b>
+                    <span>{failure.reason.replaceAll("_", " ")}</span>
+                    <p>{failure.message}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {data && (
+          <details className="action-drawer">
+            <summary><CalendarPlus size={17} /> Add or edit calendar block</summary>
+            <div className="calendar-editor">
+              <form onSubmit={handleCalendarSubmit}>
+                <label>Calendar entry<select value={calendarSelection} onChange={(event) => handleCalendarSelection(event.target.value)} disabled={writesDisabled}>
+                  <option value="new">New calendar block</option>
+                  {data.calendarBlocks.map((block) => <option key={block.id} value={block.id}>{block.title}</option>)}
+                </select></label>
+                <label>Title<input required value={calendarTitle} onChange={(event) => setCalendarTitle(event.target.value)} placeholder="Extra lecture" disabled={writesDisabled} /></label>
+                <div className="calendar-time-fields">
+                  <label>Starts<input required type="datetime-local" value={calendarStart} onChange={(event) => setCalendarStart(event.target.value)} disabled={writesDisabled} /></label>
+                  <label>Ends<input required type="datetime-local" value={calendarEnd} onChange={(event) => setCalendarEnd(event.target.value)} disabled={writesDisabled} /></label>
+                </div>
+                <label>Flexibility<select value={calendarFlexibility} onChange={(event) => setCalendarFlexibility(event.target.value as "hard" | "soft" | "flexible")} disabled={writesDisabled}>
+                  <option value="hard">Hard — cannot move</option><option value="soft">Soft</option><option value="flexible">Flexible</option>
+                </select></label>
+                <button className="calendar-submit" type="submit" disabled={writesDisabled || !calendarTitle.trim() || !calendarStart || !calendarEnd}>
+                  {operationLoading ? <RefreshCw className="spin" size={15} /> : <CalendarPlus size={15} />}{calendarSelection === "new" ? "Add & replan" : "Update & replan"}
+                </button>
+              </form>
+              <div className="calendar-list"><strong>Current calendar</strong>{data.calendarBlocks.map((block) => <button type="button" key={block.id} onClick={() => handleCalendarSelection(block.id)} disabled={writesDisabled}><span>{block.title}</span><small>{formatScheduleDateTime(block.start_time)} · {block.flexibility}</small></button>)}</div>
+            </div>
+          </details>
+        )}
 
         {loading && !data ? <LoadingState /> : error ? (
           <div className="error-state" role="alert">
@@ -202,10 +682,45 @@ export default function App() {
                   <article className="timeline-item" key={task.id}>
                     <div className="time-column"><strong>{formatTime(task.start_time)}</strong><span>{formatTime(task.end_time)}</span></div>
                     <div className="timeline-rail"><span className={index === 0 ? "current" : ""} /></div>
-                    <div className="task-copy"><h3>{readableTaskId(task.task_id)}</h3><span className={`flexibility ${task.flexibility}`}>{task.flexibility}</span></div>
+                    <div className="task-copy">
+                      <h3>{tasksById.get(task.task_id)?.name ?? "Task details unavailable"}</h3>
+                      <div className="task-meta"><span className={`flexibility ${task.flexibility}`}>{task.flexibility}</span><span className={`task-status ${tasksById.get(task.task_id)?.status ?? "pending"}`}>{tasksById.get(task.task_id)?.status ?? "pending"}</span></div>
+                    </div>
                   </article>
                 ))}
               </div>
+              {planResult && planResult.unscheduled_tasks.length > 0 && (
+                <div className="unscheduled-section" role="status">
+                  <div className="unscheduled-heading">
+                    <TriangleAlert size={16} />
+                    <h3>Needs scheduling attention</h3>
+                    <span>{planResult.unscheduled_tasks.length}</span>
+                  </div>
+                  <div className="unscheduled-list">
+                    {planResult.unscheduled_tasks.map((failure) => (
+                      <article key={failure.task_id}>
+                        <strong>{tasksById.get(failure.task_id)?.name ?? "Task details unavailable"}</strong>
+                        <span>{failure.reason.replaceAll("_", " ")}</span>
+                        <p>{failure.message}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <details className="task-actions">
+                <summary>Task status & actions <span>{data.tasks.length}</span></summary>
+                <div className="task-action-list">
+                  {data.tasks.map((task) => (
+                    <article key={task.id}>
+                      <div><strong>{task.name}</strong><span className={`task-status ${task.status}`}>{task.status.replaceAll("_", " ")}</span></div>
+                      <div className="task-buttons">
+                        <button type="button" onClick={() => handleTaskAction(task, "task_completed")} disabled={writesDisabled || task.status === "completed"}><CheckCircle2 size={13} /> Complete</button>
+                        <button className="missed" type="button" onClick={() => handleTaskAction(task, "task_missed")} disabled={writesDisabled || task.status === "completed" || task.status === "missed"}><XCircle size={13} /> Missed</button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </details>
             </section>
 
             <section className="panel activity-panel">
@@ -220,7 +735,7 @@ export default function App() {
                 ) : activity.map((event) => (
                   <article className={`activity-item ${event.event_type}`} key={event.id}>
                     <span className="activity-marker" />
-                    <div><h3>{eventCopy[event.event_type].label}</h3><p>{eventCopy[event.event_type].detail}</p><time>{formatEventTime(event.timestamp, now)}</time></div>
+                    <div><h3>{eventLabels[event.event_type]}</h3><p>{eventReference(event)}</p><time dateTime={event.timestamp}>{formatEventTime(event.timestamp, now)}</time></div>
                   </article>
                 ))}
               </div>

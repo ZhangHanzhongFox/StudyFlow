@@ -135,6 +135,14 @@ Initial event types:
 - `assessment_updated`
 - `calendar_changed`
 
+`PlanningEvent` deliberately contains no calendar payload. The HTTP-only
+`CalendarChangeRequest` wrapper pairs an unchanged `PlanningEvent` with an
+unchanged `CalendarBlock` for atomic calendar updates. It is not a sixth domain
+model. See `docs/API_CONTRACT.md` for request validation and transaction rules.
+
+`AssessmentChangeRequest` likewise pairs the unchanged `PlanningEvent` and
+`Assessment` at the HTTP boundary; it is not a sixth persisted domain model.
+
 ## Contract relationships
 
 ```text

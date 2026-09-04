@@ -1,0 +1,66 @@
+[
+  {
+    "id": "gcal-se-lecture-0902",
+    "summary": "Software Engineering Lecture",
+    "start": {"dateTime": "2026-09-02T13:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-02T15:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-lecture-software-engineering-0902", "studyflow_flexibility": "hard"}}
+  },
+  {
+    "id": "gcal-gym-0902",
+    "summary": "Gym session",
+    "start": {"dateTime": "2026-09-02T18:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-02T19:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-gym-0902", "studyflow_flexibility": "soft"}}
+  },
+  {
+    "id": "gcal-algorithms-lecture-0903",
+    "summary": "Algorithms Lecture",
+    "start": {"dateTime": "2026-09-03T10:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-03T12:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-lecture-algorithms-0903", "studyflow_flexibility": "hard"}}
+  },
+  {
+    "id": "gcal-work-0903",
+    "summary": "Part-time work shift",
+    "start": {"dateTime": "2026-09-03T17:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-03T21:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-part-time-shift-0903", "studyflow_flexibility": "hard"}}
+  },
+  {
+    "id": "gcal-team-0904",
+    "summary": "Presentation team meeting",
+    "start": {"dateTime": "2026-09-04T14:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-04T15:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-team-meeting-0904", "studyflow_flexibility": "soft"}}
+  },
+  {
+    "id": "gcal-appointment-0905",
+    "summary": "Personal appointment",
+    "start": {"dateTime": "2026-09-05T11:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-05T12:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-personal-appointment-0905", "studyflow_flexibility": "hard"}}
+  },
+  {
+    "id": "gcal-db-lecture-0907",
+    "summary": "Database Systems Lecture",
+    "start": {"dateTime": "2026-09-07T09:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-07T11:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-lecture-databases-0907", "studyflow_flexibility": "hard"}}
+  },
+  {
+    "id": "gcal-algorithms-tutorial-0908",
+    "summary": "Algorithms Tutorial",
+    "start": {"dateTime": "2026-09-08T15:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "end": {"dateTime": "2026-09-08T17:00:00+08:00", "timeZone": "Asia/Singapore"},
+    "transparency": "opaque",
+    "extendedProperties": {"private": {"studyflow_id": "calendar-algorithms-tutorial-0908", "studyflow_flexibility": "hard"}}
+  }
+]
