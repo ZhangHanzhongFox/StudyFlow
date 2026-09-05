@@ -26,10 +26,16 @@ async function requestJson<T>(
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     const detail = body?.detail;
+    const validationMessage = Array.isArray(detail)
+      ? detail.map((issue) => {
+        const location = Array.isArray(issue?.loc) ? issue.loc.join(".") : "";
+        return typeof issue?.msg === "string" ? `${location ? `${location}: ` : ""}${issue.msg}` : "";
+      }).filter(Boolean).join("; ")
+      : "";
     throw new ApiError(
       response.status,
       detail?.code ?? (response.status === 422 ? "validation_error" : "request_failed"),
-      detail?.message ?? `Request failed with status ${response.status}`,
+      validationMessage || detail?.message || (typeof detail === "string" ? detail : `Request failed with status ${response.status}`),
     );
   }
   return response.json() as Promise<T>;
@@ -91,12 +97,19 @@ export function changeCalendar(
 export function compareSchedules(before: ScheduledTask[], after: ScheduledTask[]) {
   const previous = new Map(before.map((item) => [item.task_id, item]));
   const latest = new Map(after.map((item) => [item.task_id, item]));
+  const unchanged = (old: ScheduledTask, item: ScheduledTask) =>
+    Date.parse(old.start_time) === Date.parse(item.start_time)
+    && Date.parse(old.end_time) === Date.parse(item.end_time)
+    && old.flexibility === item.flexibility;
   return {
     added: after.filter((item) => !previous.has(item.task_id)),
     moved: after.filter((item) => {
       const old = previous.get(item.task_id);
-      return old && (Date.parse(old.start_time) !== Date.parse(item.start_time)
-        || Date.parse(old.end_time) !== Date.parse(item.end_time));
+      return old && !unchanged(old, item);
+    }),
+    preserved: after.filter((item) => {
+      const old = previous.get(item.task_id);
+      return old && unchanged(old, item);
     }),
     removed: before.filter((item) => !latest.has(item.task_id)),
   };

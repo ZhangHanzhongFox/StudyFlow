@@ -42,12 +42,12 @@ const typeLabels: Record<Assessment["type"], string> = {
   quiz: "Quiz",
 };
 
-const eventCopy: Record<PlanningEvent["event_type"], { label: string; detail: string }> = {
-  task_completed: { label: "Task completed", detail: "Progress observed and plan updated" },
-  task_missed: { label: "Task missed", detail: "Schedule impact detected" },
-  new_assessment: { label: "Assessment added", detail: "New deadline entered the plan" },
-  assessment_updated: { label: "Assessment updated", detail: "Requirements were reviewed" },
-  calendar_changed: { label: "Calendar changed", detail: "Availability was re-evaluated" },
+const eventLabels: Record<PlanningEvent["event_type"], string> = {
+  task_completed: "Task completed",
+  task_missed: "Task missed",
+  new_assessment: "Assessment added",
+  assessment_updated: "Assessment updated",
+  calendar_changed: "Calendar changed",
 };
 
 function sameLocalDay(left: Date, right: Date) {
@@ -76,10 +76,12 @@ function formatEventTime(value: string, now: Date) {
 
 function formatScheduleDateTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZoneName: "short",
   }).format(new Date(value));
 }
 
@@ -103,6 +105,7 @@ type OperationState = "idle" | "loading" | "success" | "error" | "refresh_error"
 interface ScheduleChanges {
   added: ScheduledTask[];
   removed: ScheduledTask[];
+  preserved: ScheduledTask[];
   moved: Array<{ before: ScheduledTask; after: ScheduledTask }>;
   trigger: string;
 }
@@ -170,6 +173,7 @@ export default function App() {
   // React state updates are asynchronous; the ref also blocks same-tick submissions.
   const actionInFlight = useRef(false);
   const now = useMemo(() => new Date(), []);
+  const displayTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const load = useCallback(() => {
     const controller = new AbortController();
@@ -212,11 +216,25 @@ export default function App() {
   const isBusy = loading || planState === "loading" || operationLoading;
   const writesDisabled = isBusy || Boolean(error) || Boolean(pendingRefresh) || Boolean(pendingPlanRefresh);
 
+  const eventReference = (event: PlanningEvent) => {
+    if (event.event_type === "task_completed" || event.event_type === "task_missed") {
+      return tasksById.get(event.reference_id)?.name ?? event.reference_id;
+    }
+    if (event.event_type === "calendar_changed") {
+      return data?.calendarBlocks.find((block) => block.id === event.reference_id)?.title ?? event.reference_id;
+    }
+    return data?.assessments.find((assessment) => assessment.id === event.reference_id)?.title ?? event.reference_id;
+  };
+
   const applyPlanningResult = useCallback(async (
     result: SchedulingResult,
     before: ScheduledTask[],
     trigger: string,
   ) => {
+    // Called only after a confirmed write, including the original-event retry.
+    setPlanResult(null);
+    setPlanState("idle");
+    setChangeSummary(null);
     try {
       const controller = new AbortController();
       const refreshed = await getDashboardData(controller.signal);
@@ -234,7 +252,7 @@ export default function App() {
         trigger,
       });
       setOperationMessage(
-        `${comparison.moved.length} moved · ${comparison.added.length} added · ${comparison.removed.length} removed`,
+        `${comparison.moved.length} moved/updated · ${comparison.added.length} added · ${comparison.removed.length} removed · ${comparison.preserved.length} preserved`,
       );
       setPendingRefresh(null);
       setPendingAction(null);
@@ -261,11 +279,6 @@ export default function App() {
     setOperationMessage(trigger);
     setPendingRefresh(null);
     setPendingAction({ request, trigger, before });
-    setOperationResult(null);
-    setScheduleChanges(null);
-    setPlanResult(null);
-    setPlanState("idle");
-    setChangeSummary(null);
 
     try {
       const result = "calendar_block" in request
@@ -325,12 +338,15 @@ export default function App() {
         trigger: pendingAction.trigger,
       });
       setOperationResult(null);
+      setPlanResult(null);
+      setPlanState("idle");
+      setChangeSummary(null);
       setOperationMessage("The original action was already saved; the dashboard is now refreshed. Its one-time unscheduled result is no longer available.");
       setPendingAction(null);
       setOperationState("success");
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setOperationMessage("Could not finish recovering the previous action. Retry to check its original event before submitting again.");
+      setOperationMessage(`${apiErrorMessage(reason)} Retry to check the original event before submitting again.`);
       setOperationState("error");
     } finally {
       actionInFlight.current = false;
@@ -435,7 +451,6 @@ export default function App() {
     const controller = new AbortController();
     setPlanState("loading");
     setPlanError(null);
-    setChangeSummary(null);
 
     try {
       const result = await generatePlan(controller.signal);
@@ -450,7 +465,9 @@ export default function App() {
       await applyGeneratedPlan(result, data.schedule);
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
-      setPlanError("StudyFlow couldn’t confirm that the plan was generated. Check the API before retrying; another generation will reset task progress.");
+      setPlanError(reason instanceof ApiError
+        ? apiErrorMessage(reason)
+        : "StudyFlow couldn’t confirm that the plan was generated. Check the API before retrying; another generation will reset task progress.");
       setPlanState("error");
     } finally {
       actionInFlight.current = false;
@@ -473,6 +490,7 @@ export default function App() {
             <p className="eyebrow">{new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(now)} · Your adaptive study workspace</p>
             <h1>Your study day, made clear.</h1>
             <p>Your plan is balanced. Here’s what the agent is watching today.</p>
+            <p className="display-timezone">All times displayed in {displayTimezone} (browser timezone).</p>
           </div>
           <div className="intro-actions">
             <div className="loop-card" aria-label="StudyFlow agent loop">
@@ -506,6 +524,7 @@ export default function App() {
                     ? (pendingPlanRefresh ? "Loading the saved tasks and schedule." : "Tasks, dependencies, and available time are being evaluated.")
                     : "Generate a plan to see scheduled, moved, and unscheduled work here."}
             </p>
+            {changeSummary && planState !== "success" && <p>Last saved plan: {changeSummary}</p>}
           </div>
           {planState === "error" && (
             <button type="button" onClick={handleGeneratePlan} disabled={writesDisabled}><RefreshCw size={14} /> Retry</button>
@@ -536,13 +555,15 @@ export default function App() {
                 </button>
               )}
             </div>
-            {scheduleChanges && operationState === "success" && (
+            {scheduleChanges && (
               <div className="schedule-changes">
+                {operationState !== "success" && <p className="no-schedule-changes">Last saved comparison — the current action has not refreshed this result.</p>}
                 {scheduleChanges.moved.map(({ before, after }) => (
                   <article key={`moved-${after.task_id}`}>
-                    <span className="change-kind">Moved</span>
+                    <span className="change-kind">{Date.parse(before.start_time) === Date.parse(after.start_time) && Date.parse(before.end_time) === Date.parse(after.end_time) ? "Updated" : "Moved"}</span>
                     <strong>{tasksById.get(after.task_id)?.name ?? "Task details unavailable"}</strong>
-                    <p><del>{formatScheduleDateTime(before.start_time)}–{formatTime(before.end_time)}</del><ArrowRight size={13} /><ins>{formatScheduleDateTime(after.start_time)}–{formatTime(after.end_time)}</ins></p>
+                    <p><del>{formatScheduleDateTime(before.start_time)} – {formatScheduleDateTime(before.end_time)}</del><ArrowRight size={13} /><ins>{formatScheduleDateTime(after.start_time)} – {formatScheduleDateTime(after.end_time)}</ins></p>
+                    <small>Flexibility: {before.flexibility} → {after.flexibility}{before.flexibility !== after.flexibility ? " (updated)" : ""}</small>
                     <small>Triggered by: {scheduleChanges.trigger}</small>
                   </article>
                 ))}
@@ -550,14 +571,23 @@ export default function App() {
                   <article key={`added-${item.task_id}`}>
                     <span className="change-kind added">Added</span>
                     <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
-                    <p>{formatScheduleDateTime(item.start_time)}–{formatTime(item.end_time)}</p>
+                    <p>{formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
                   </article>
                 ))}
                 {scheduleChanges.removed.map((item) => (
                   <article key={`removed-${item.task_id}`}>
                     <span className="change-kind removed">Removed</span>
                     <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
-                    <p>Previous slot: {formatScheduleDateTime(item.start_time)}–{formatTime(item.end_time)}</p>
+                    <p>Previous slot: {formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
+                  </article>
+                ))}
+                {scheduleChanges.preserved.map((item) => (
+                  <article key={`preserved-${item.task_id}`}>
+                    <span className="change-kind preserved">Preserved</span>
+                    <strong>{tasksById.get(item.task_id)?.name ?? "Task details unavailable"}</strong>
+                    <p>{formatScheduleDateTime(item.start_time)} – {formatScheduleDateTime(item.end_time)}</p>
+                    <small>Unchanged placement · {item.flexibility}</small>
+                    <span className="task-status">{tasksById.get(item.task_id)?.status.replaceAll("_", " ") ?? "Status unavailable"}</span>
                   </article>
                 ))}
                 {scheduleChanges.moved.length === 0 && scheduleChanges.added.length === 0 && scheduleChanges.removed.length === 0 && (
@@ -705,7 +735,7 @@ export default function App() {
                 ) : activity.map((event) => (
                   <article className={`activity-item ${event.event_type}`} key={event.id}>
                     <span className="activity-marker" />
-                    <div><h3>{eventCopy[event.event_type].label}</h3><p>{eventCopy[event.event_type].detail}</p><time>{formatEventTime(event.timestamp, now)}</time></div>
+                    <div><h3>{eventLabels[event.event_type]}</h3><p>{eventReference(event)}</p><time dateTime={event.timestamp}>{formatEventTime(event.timestamp, now)}</time></div>
                   </article>
                 ))}
               </div>

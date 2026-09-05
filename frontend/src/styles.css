@@ -62,6 +62,10 @@ main { max-width: 1380px; margin: 0 auto; padding: 56px 24px 48px; }
 .schedule-changes small { display: block; margin-top: 7px; color: #92978f; font-size: 9px; }
 .change-kind { display: inline-block; padding: 3px 6px; border-radius: 5px; color: #885f24; background: #f6e9d2; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .change-kind.added { color: #3d745c; background: #e5f0e7; }.change-kind.removed { color: #975448; background: #f6e5e1; }
+.change-kind.preserved { color: #45637c; background: #e7eef5; }
+.intro .display-timezone { font-size: 12px; }
+.schedule-changes strong { white-space: normal; overflow-wrap: anywhere; }
+.schedule-changes .task-status { margin-top: 7px; }
 .no-schedule-changes { grid-column: 1 / -1; margin: 0; padding: 10px; color: #757d73; font-size: 11px; }
 .operation-failures { margin: 0 15px 15px; padding: 12px; border: 1px solid #edd4ce; border-radius: 11px; background: #fff8f6; }
 .operation-failures > strong { display: flex; align-items: center; gap: 6px; color: #9a574b; font-size: 11px; }

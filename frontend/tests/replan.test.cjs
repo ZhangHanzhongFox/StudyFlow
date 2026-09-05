@@ -135,7 +135,11 @@ test("missed work moves its dependents and locks other writes until refresh comp
   await hold.started;
   try { await assertWriteControlsDisabled(); } finally { hold.release(); }
   await page.getByText("Replan complete", { exact: true }).waitFor();
-  assert.equal(await page.locator(".schedule-changes article").count(), 2);
+  assert.equal(await page.locator(".schedule-changes article").count(), 4);
+  assert.equal(await page.locator(".change-kind.preserved").count(), 2);
+  const preservedResearch = page.locator(".schedule-changes article").filter({ hasText: "task-research" });
+  assert.match(await preservedResearch.innerText(), /preserved/i);
+  assert.match(await preservedResearch.innerText(), /completed/i);
   const schedule = await get("schedule");
   for (const [id, start] of Object.entries(fixture.scenarios.missed.expected_start_times)) {
     assert.equal(schedule.find((item) => item.task_id === id).start_time, start);
@@ -182,6 +186,34 @@ test("complete updates task status and keeps completed placements", async () => 
   assert.equal((await get("tasks")).find((task) => task.id === "task-slides").status, "completed");
   assert.equal(await taskRow("task-slides").getByRole("button", { name: "Missed", exact: true }).isDisabled(), true);
   await assertPreserved();
+});
+
+test("rejected calendar writes retain the last comparison and unscheduled reasons", async () => {
+  await calendarForm("2026-09-03T18:00");
+  await page.getByRole("button", { name: "Add & replan" }).click();
+  await page.getByText("3 task(s) could not be scheduled", { exact: false }).waitFor();
+  const failures = await page.locator(".operation-failures").innerText();
+  const changes = await page.locator(".schedule-changes article").allTextContents();
+  await page.getByLabel("Ends").fill("2026-09-03T08:00");
+  await page.getByRole("button", { name: "Add & replan" }).click();
+  await page.getByText("Replan failed", { exact: true }).waitFor();
+  assert.equal(await page.locator(".operation-failures").innerText(), failures);
+  assert.deepEqual(await page.locator(".schedule-changes article").allTextContents(), changes);
+  assert.match(await page.locator(".replan-notice-heading").innerText(), /body/);
+});
+
+test("Generate Plan displays the specific API error and retains saved replan details", async () => {
+  await taskRow("task-slides").getByRole("button", { name: "Complete", exact: true }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  const changes = await page.locator(".schedule-changes").innerText();
+  await page.route("**/api/plan", (route) => route.fulfill({ status: 500, json: {
+    detail: { code: "planning_failed", message: "The planning pipeline could not complete." },
+  } }));
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Regenerate Plan", exact: true }).click();
+  await page.getByText("Plan update failed", { exact: true }).waitFor();
+  assert.match(await page.locator(".change-notice").innerText(), /The planning pipeline could not complete/);
+  assert.equal(await page.locator(".schedule-changes").innerText(), changes);
 });
 
 test("schedule changes show the next day's date when missed work cannot fit tonight", async () => {
