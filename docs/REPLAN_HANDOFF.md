@@ -1,5 +1,9 @@
 # 9 月 3 日 Replan 联调约定
 
+9 月 5 日现状与可执行命令见 [C 交接](SEPT5_C_HANDOFF.md)。下方 A/B/C 分日说明是
+历史交接记录；现行 HTTP 新增/更新入口是 `/assessment-changes`，assessment 事件的
+`preserve_valid_affected=True`。D 已实现 Preserved 展示，reset/新增考核按钮仍待接入。
+
 ## 9 月 4 日 C 增量交接（待 A/B/D 人工签收）
 
 - `POST /demo/reset`：无 body，200 `{status:"reset"}`，恢复启动时全部五个集合。
