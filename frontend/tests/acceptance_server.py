@@ -20,11 +20,17 @@ from backend.schemas import Assessment, CalendarBlock, ScheduledTask, Task
 from backend.services import PlanningPipeline, PlanningState
 
 fixture = json.loads((ROOT / "data/scenarios/replan_acceptance.json").read_text())
-state = PlanningState()
+initial = fixture["initial_state"]
+state = PlanningState(
+    assessments=[Assessment.model_validate(item) for item in initial["assessments"]],
+    tasks=[Task.model_validate(item) for item in initial["tasks"]],
+    calendar_blocks=[CalendarBlock.model_validate(item) for item in initial["calendar_blocks"]],
+    scheduled_tasks=[ScheduledTask.model_validate(item) for item in initial["scheduled_tasks"]],
+)
 app = create_app(state, PlanningPipeline(
     StudyFlowAgent(),
     StudyScheduler(planning_start=datetime.fromisoformat("2026-09-03T09:00:00+08:00")),
-))
+), environment="demo", demo_reset_enabled=True)
 # Exercise default runtime wiring against a date later than the provider mocks.
 app.mount("/live", create_app(
     clock=lambda: datetime.fromisoformat("2026-09-04T01:00:00+08:00"),
