@@ -24,6 +24,8 @@ Existing canonical models and SchedulingResult fields are unchanged.
 | `POST` | `/plan` | `SchedulingResult` | Runs the default or injected Agent → Scheduler pipeline |
 | `POST` | `/replan` | `SchedulingResult` | Runs affected-task discovery and dependency-injected rescheduling |
 | `POST` | `/calendar-changes` | `SchedulingResult` | Upserts one calendar block and replans in one transaction |
+| `POST` | `/assessment-changes` | `SchedulingResult` | Atomic canonical assessment + task update and replan |
+| `POST` | `/demo/reset` | `{"status":"reset"}` | Restore five startup collections; opt-in demo/development only |
 
 FastAPI also provides generated OpenAPI documentation at `/docs` while the
 application is running.
@@ -93,7 +95,12 @@ use this endpoint so an observation cannot pretend to update an entity.
 D: use `changeAssessment(change, signal)`, keep the same event ID for retries,
 and refresh assessments as well as the other four collections. Existing
 SchedulingResult and compareSchedules semantics are unchanged; Preserved means
-same task_id and equal absolute start/end instants in both snapshots.
+same task_id, equal absolute start/end instants, and equal flexibility in both snapshots.
+
+Copyable September 5–6 requests, local startup, error handling and actual clean
+verification are in [SEPT5_C_HANDOFF.md](SEPT5_C_HANDOFF.md). The documented
+logging configuration exposes final HTTP status/duration plus existing Agent
+logs; response bodies and health shape are unchanged.
 
 ## Scheduling result
 

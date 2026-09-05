@@ -124,10 +124,13 @@ def test_staged_new_assessment_schedules_new_tasks_and_preserves_existing_plan()
         "reference_id": "assessment-new",
     }
 
-    response = request(app, "POST", "/replan", json=event)
-
-    assert response.status_code == 200, response.text
-    result = response.json()
+    # This scenario has already staged the entity and its custom tasks. HTTP
+    # ingestion is separately exercised through /assessment-changes.
+    from backend.schemas import PlanningEvent
+    result = state.replan(
+        PlanningEvent.model_validate(event),
+        PlanningPipeline(StudyFlowAgent(), StudyScheduler()),
+    ).model_dump(mode="json")
     assert result["unscheduled_tasks"] == []
     after_by_task = {
         item["task_id"]: item for item in result["scheduled_tasks"]

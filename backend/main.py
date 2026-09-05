@@ -5,9 +5,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import os
 import logging
+from time import perf_counter
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from backend.agents import StudyFlowAgent
 from backend.agents.bedrock import configured_llm
@@ -86,6 +89,19 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def log_api_result(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        """Log final HTTP outcomes without request bodies or query strings."""
+        started = perf_counter()
+        response = await call_next(request)
+        route = request.scope.get("route")
+        logger.info(
+            "api_request method=%s route=%s status=%s duration_ms=%.1f",
+            request.method, getattr(route, "path", "unmatched"),
+            response.status_code, (perf_counter() - started) * 1000,
+        )
+        return response
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -201,6 +217,7 @@ def create_app(
                     },
                 ) from error
             except Exception as error:
+                logger.error("planning_failed error_type=%s", type(error).__name__)
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail={
@@ -279,6 +296,7 @@ def create_app(
                 },
             ) from error
         except Exception as error:
+            logger.error("replanning_failed error_type=%s", type(error).__name__)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={

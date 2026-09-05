@@ -1,13 +1,5 @@
 # StudyFlow
 
-### September 4 demo integration
-
-Run locally with `STUDYFLOW_ENV=demo STUDYFLOW_ENABLE_DEMO_RESET=1 STUDYFLOW_LLM_PROVIDER=none .venv/bin/python -m uvicorn backend.main:app` to enable full `POST /demo/reset`.
-Without both demo settings, reset is absent. It restores all five startup collections,
-not just a regenerated plan. `POST /assessment-changes` atomically adds/updates a
-canonical assessment, tasks and schedule. See `docs/API_CONTRACT.md` for payloads,
-history-preservation limits and frontend handoff.
-
 StudyFlow turns university assessment deadlines into executable study
 workflows, schedules them around existing commitments, observes progress, and
 replans when circumstances change.
@@ -20,19 +12,58 @@ The project is being developed for the SimplifyNext Agentic AI Hackathon 2026.
 
 ## Local setup
 
+Run from the repository root. Use Python **3.12** and Node.js **24** with npm
+(Python 3.12.14 / Node 24.19.0 / npm 11.6.0 were used for the September 5 clean
+verification). Install dependencies while online; the offline demo makes no
+Canvas, Google Calendar, or LLM requests.
+
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Run the provider-backed dynamic API:
+Terminal 1 — normal offline API, using the current Singapore time:
 
 ```bash
-uvicorn backend.main:app --reload
+STUDYFLOW_LLM_PROVIDER=none python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1 --log-config backend/logging.json --no-access-log
 ```
 
 Then open `http://127.0.0.1:8000/docs` for the generated API documentation.
+
+For the September 6 demo, stop the normal API and start this version instead:
+
+```bash
+STUDYFLOW_ENV=demo STUDYFLOW_ENABLE_DEMO_RESET=1 STUDYFLOW_LLM_PROVIDER=none python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1 --log-config backend/logging.json --no-access-log
+```
+
+Both demo settings are necessary for `POST /demo/reset`; otherwise it is absent
+(404), including in production mode. Reset restores all **five startup collections**,
+including assessments and events. Regenerate Plan only generates another plan.
+This server has process-local state: use one worker, keep it local, and avoid
+`--reload` during recording because a restart discards progress. The supplied log
+configuration displays Agent decisions/fallback and final HTTP statuses without
+logging request bodies or query strings. It does not add Activity API fields.
+
+Terminal 2 — frontend, starting from the repository root:
+
+```bash
+cd frontend
+npm ci
+npm run dev -- --host 127.0.0.1 --strictPort
+```
+
+Open `http://127.0.0.1:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`.
+Leave `VITE_API_BASE_URL` unset for this same-origin setup. For a direct API origin,
+configure `create_app(allowed_origins=...)` for that exact frontend origin; default
+CORS allows `http://localhost:3000` and `http://localhost:5173`.
+No frontend source changes are needed for local hosting. `npm run build` produces
+`frontend/dist`; `vite preview` is a local preview, not an external deployment.
+
+The default fixtures already have deadlines on September 10, 12 and 14 and were
+verified for September 5–6 at 08:00, 14:00 and 23:00. No dates/IDs were changed.
+After study hours, new sessions start in the next available study window. The
+September 3 acceptance fixture is historical test data, not the current UI plan.
 
 The default app loads Canvas- and Google Calendar-shaped mock payloads through
 the integration adapters, then runs `StudyFlowAgent → PlanningPipeline →
@@ -53,8 +84,57 @@ option retains the fixture-based date inference used by the existing demos.
 Run tests:
 
 ```bash
-python -m pytest -q
+python -m pip check
+python -m pytest -o addopts='' -q
+cd frontend
+npm test
+npm run build
+# Optional browser regression dependencies (no manifest/lockfile changes):
+npm install --no-save --package-lock=false playwright@1.62.1
+npx playwright install chromium
+npm run test:e2e
 ```
+
+Browser tests create their own isolated backend and Vite server. Set
+`STUDYFLOW_TEST_PYTHON` to an absolute Python path if it is not `.venv/bin/python`.
+They exercise the existing UI; reset/new-assessment controls still require D's
+integration. The HTTP client helpers already exist.
+
+For a **disposable reset-enabled demo server**, run from the root:
+
+```bash
+python -m backend.demo_check --base-url http://127.0.0.1:8000 --allow-reset
+```
+
+This performs three rounds of Plan → Complete → Missed → Replan → assessment
+changes → Reset and validates all five collections. It resets existing demo
+changes, prints the explicitly simulated missed-event time, and ends at startup
+state. Product scheduling still uses the real clock. See
+[September 5 C handoff](docs/SEPT5_C_HANDOFF.md) for copyable requests, verification
+evidence, the recording runbook and slide-ready architecture/fallback content.
+
+### Common startup problems
+
+- `python`, `npm`, or a module is missing: install Python/Node first, activate the
+  project venv and repeat `pip install -r requirements.txt` / `npm ci` in their
+  respective directories. Do not install backend packages into system Python.
+- Port busy: stop your previous server or select a port and update the proxy
+  configuration together. `--strictPort` prevents silently opening a new UI port.
+- Browser `/api` returns 502: confirm `GET http://127.0.0.1:8000/health` works and
+  the backend terminal is still running. A CORS error usually means a direct URL
+  bypassed the Vite proxy or an origin differs by hostname/port.
+- Reset 404: check both demo settings and restart the backend. Reset is absent
+  from OpenAPI when disabled. A successful reset requires a fresh GET of all
+  five collections; do not submit another event to refresh.
+- 409 duplicate: refresh events with the original ID before retrying. HTTP 200
+  with `unscheduled_tasks` is partial success and must remain visible.
+- No sessions today: check current time, study hours and deadlines; inspect the
+  full schedule across dates. Expired deadlines are not a server startup fault.
+- Invalid LLM configuration fails startup. Set `STUDYFLOW_LLM_PROVIDER=none` and
+  restart for the deterministic demo. With Bedrock enabled, unavailable/invalid
+  output falls back during requests but may first wait for provider timeouts.
+- Clean tests may emit upstream Starlette/httpx/AnyIO deprecation warnings.
+  They did not block the validated install; no new HTTP SDK was added at freeze.
 
 ## Data integration and backend state
 
