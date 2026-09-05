@@ -153,6 +153,40 @@ def test_ready_tasks_are_ordered_by_descending_priority() -> None:
     assert [item.task_id for item in result.scheduled_tasks] == ["high", "low"]
 
 
+def test_earlier_assessment_deadline_precedes_priority_across_assessments() -> None:
+    urgent = make_assessment(
+        "urgent",
+        deadline=datetime(2026, 9, 2, 10, tzinfo=SGT),
+    )
+    later = make_assessment(
+        "later",
+        deadline=datetime(2026, 9, 2, 22, tzinfo=SGT),
+    )
+    tasks = [
+        make_task(
+            "later-high-priority",
+            assessment_id="later",
+            duration_minutes=60,
+            priority=10,
+        ),
+        make_task(
+            "urgent-low-priority",
+            assessment_id="urgent",
+            duration_minutes=120,
+            priority=1,
+        ),
+    ]
+
+    result = make_scheduler().schedule_tasks([urgent, later], tasks, [])
+
+    assert result.unscheduled_tasks == []
+    assert [item.task_id for item in result.scheduled_tasks] == [
+        "urgent-low-priority",
+        "later-high-priority",
+    ]
+    assert result.scheduled_tasks[0].end_time == urgent.deadline
+
+
 def test_overlapping_hard_blocks_are_merged_before_slot_search() -> None:
     blocks = [
         CalendarBlock(
@@ -648,6 +682,38 @@ def test_new_assessment_tasks_join_plan_without_moving_existing_work() -> None:
     assert by_task_id["existing-task"] == existing
     assert by_task_id["new-first"].end_time <= by_task_id["new-second"].start_time
     assert by_task_id["new-second"].end_time <= new_assessment.deadline
+
+
+def test_replan_explicitly_reports_unaffected_active_task_without_placement() -> None:
+    assessment = make_assessment(
+        deadline=datetime(2026, 9, 2, 9, tzinfo=SGT),
+    )
+    tasks = [
+        make_task("preserved", status=TaskStatus.SCHEDULED),
+        make_task("already-unscheduled", status=TaskStatus.PENDING),
+    ]
+    existing = ScheduledTask(
+        id="preserved-placement",
+        task_id="preserved",
+        start_time=PLANNING_START,
+        end_time=PLANNING_START + timedelta(hours=1),
+        flexibility=Flexibility.SOFT,
+    )
+
+    result = make_scheduler().reschedule_tasks(
+        [assessment],
+        tasks,
+        [],
+        [existing],
+        {"preserved"},
+        replanning_start=PLANNING_START,
+        preserve_valid_affected=True,
+    )
+
+    assert result.scheduled_tasks == [existing]
+    assert [(item.task_id, item.reason) for item in result.unscheduled_tasks] == [
+        ("already-unscheduled", SchedulingFailureReason.DEADLINE_CONSTRAINT),
+    ]
 
 
 def test_extended_assessment_deadline_preserves_all_valid_placements() -> None:

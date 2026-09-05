@@ -193,6 +193,15 @@ class StudyScheduler:
                 or tasks_by_id[task_id].status is TaskStatus.MISSED
             }
         target_task_ids.update(invalid_ids)
+        # A prior partial result does not persist its UnscheduledTask records.
+        # Re-evaluate every active task without a placement so the complete
+        # response never silently drops work outside the event's semantic scope.
+        target_task_ids.update(
+            task.id
+            for task in task_list
+            if task.status is not TaskStatus.COMPLETED
+            and task.id not in placements_by_task
+        )
         # A supplies semantic scope; B also repairs dependencies invalidated by
         # changed calendar constraints or by an injected agent's narrow scope.
         for task in self._topological_sort(task_list):
@@ -332,13 +341,13 @@ class StudyScheduler:
         ordering_deadlines = {
             task.id: min(
                 assessments_by_id[task.assessment_id].deadline,
-                dependency_deadlines.get(
+                (dependency_deadlines or {}).get(
                     task.id,
                     assessments_by_id[task.assessment_id].deadline,
                 ),
             )
             for task in tasks
-        } if dependency_deadlines else None
+        }
 
         for task in self._topological_sort(tasks, ordering_deadlines):
             if task.id not in target_task_ids:

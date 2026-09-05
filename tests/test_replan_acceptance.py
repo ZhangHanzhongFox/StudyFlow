@@ -19,7 +19,7 @@ from backend.scheduler import (
     UnscheduledTask,
 )
 from backend.schemas import Assessment, CalendarBlock, Flexibility, ScheduledTask, Task
-from backend.services import PlanningPipeline, PlanningState
+from backend.services import MockDataStore, PlanningPipeline, PlanningState
 from tests.test_default_runtime import request
 
 
@@ -72,6 +72,122 @@ def test_shared_acceptance_scenarios(scenario_name: str) -> None:
     assert len(after["/planning-events"]) == 1
     if scenario_name == "calendar_changed":
         assert after["/calendar-blocks"] == [scenario["request"]["calendar_block"]]
+
+
+def test_staged_new_assessment_schedules_new_tasks_and_preserves_existing_plan() -> None:
+    initial = deepcopy(FIXTURE["initial_state"])
+    initial["assessments"].append({
+        **initial["assessments"][0],
+        "id": "assessment-new",
+        "title": "New presentation",
+        "type": "presentation",
+        "deadline": "2026-09-03T14:00:00+08:00",
+    })
+    initial["tasks"].extend([
+        {
+            "id": "task-new-outline",
+            "assessment_id": "assessment-new",
+            "name": "Create outline",
+            "duration_minutes": 60,
+            "dependencies": [],
+            "priority": 4,
+            "status": "pending",
+        },
+        {
+            "id": "task-new-slides",
+            "assessment_id": "assessment-new",
+            "name": "Create slides",
+            "duration_minutes": 60,
+            "dependencies": ["task-new-outline"],
+            "priority": 4,
+            "status": "pending",
+        },
+    ])
+    state = PlanningState(
+        assessments=[Assessment.model_validate(item) for item in initial["assessments"]],
+        tasks=[Task.model_validate(item) for item in initial["tasks"]],
+        calendar_blocks=[],
+        scheduled_tasks=[
+            ScheduledTask.model_validate(item)
+            for item in initial["scheduled_tasks"]
+        ],
+    )
+    app = create_app(
+        state,
+        PlanningPipeline(StudyFlowAgent(), StudyScheduler()),
+    )
+    before = snapshot(app)
+    event = {
+        "id": "event-acceptance-new-assessment",
+        "event_type": "new_assessment",
+        "timestamp": "2026-09-03T11:00:00+08:00",
+        "reference_id": "assessment-new",
+    }
+
+    response = request(app, "POST", "/replan", json=event)
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["unscheduled_tasks"] == []
+    after_by_task = {
+        item["task_id"]: item for item in result["scheduled_tasks"]
+    }
+    assert after_by_task["task-new-outline"]["start_time"] == (
+        "2026-09-03T11:00:00+08:00"
+    )
+    assert after_by_task["task-new-slides"]["start_time"] == (
+        "2026-09-03T12:00:00+08:00"
+    )
+    for old in before["/schedule"]:
+        assert after_by_task[old["task_id"]] == old
+
+
+def test_mock_demo_slides_missed_moves_full_chain_and_preserves_other_work() -> None:
+    fixtures = MockDataStore()
+    state = PlanningState(
+        assessments=fixtures.list_assessments(),
+        tasks=fixtures.list_tasks(),
+        calendar_blocks=fixtures.list_calendar_blocks(),
+        scheduled_tasks=fixtures.list_scheduled_tasks(),
+        planning_events=[],
+    )
+    app = create_app(
+        state,
+        PlanningPipeline(StudyFlowAgent(), StudyScheduler()),
+    )
+    before = snapshot(app)
+    event = {
+        "id": "event-sept5-b-missed",
+        "event_type": "task_missed",
+        "timestamp": "2026-09-04T12:05:00+08:00",
+        "reference_id": "task-presentation-slides",
+    }
+
+    response = request(app, "POST", "/replan", json=event)
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["unscheduled_tasks"] == []
+    old_by_task = {item["task_id"]: item for item in before["/schedule"]}
+    new_by_task = {
+        item["task_id"]: item for item in result["scheduled_tasks"]
+    }
+    expected_moved_starts = {
+        "task-presentation-slides": "2026-09-04T12:05:00+08:00",
+        "task-presentation-script": "2026-09-04T13:05:00+08:00",
+        "task-presentation-rehearsal": "2026-09-04T16:00:00+08:00",
+    }
+    assert {
+        task_id: new_by_task[task_id]["start_time"]
+        for task_id in expected_moved_starts
+    } == expected_moved_starts
+    for task_id in old_by_task.keys() - expected_moved_starts.keys():
+        assert new_by_task[task_id] == old_by_task[task_id]
+    stored_tasks = {
+        item["id"]: item for item in request(app, "GET", "/tasks").json()
+    }
+    assert stored_tasks["task-presentation-requirements"]["status"] == "completed"
+    assert stored_tasks["task-presentation-slides"]["status"] == "scheduled"
 
 
 def test_completed_status_is_applied_before_agent_and_scheduler() -> None:
@@ -194,6 +310,33 @@ def test_no_remaining_slot_commits_calendar_and_explicit_failures() -> None:
     assert after["/calendar-blocks"] == [change["calendar_block"]]
     assert after["/planning-events"] == [change["event"]]
     assert all(item["status"] == "pending" for item in after["/tasks"] if item["id"] != "task-research")
+
+
+def test_later_replan_keeps_reporting_previously_unscheduled_unrelated_work() -> None:
+    app, _ = setup()
+    change = deepcopy(FIXTURE["scenarios"]["calendar_changed"]["request"])
+    change["calendar_block"]["end_time"] = "2026-09-03T18:00:00+08:00"
+    first = request(app, "POST", "/calendar-changes", json=change)
+    assert first.status_code == 200
+
+    event = {
+        "id": "event-after-partial-result",
+        "event_type": "task_missed",
+        "timestamp": "2026-09-03T10:30:00+08:00",
+        "reference_id": "task-independent",
+    }
+    second = request(app, "POST", "/replan", json=event)
+
+    assert second.status_code == 200, second.text
+    result = second.json()
+    assert [item["task_id"] for item in result["scheduled_tasks"]] == [
+        "task-research",
+    ]
+    assert {item["task_id"]: item["reason"] for item in result["unscheduled_tasks"]} == {
+        "task-slides": "deadline_constraint",
+        "task-script": "dependency_conflict",
+        "task-independent": "deadline_constraint",
+    }
 
 
 def test_calendar_update_replaces_one_block_and_preserves_unrelated_work() -> None:
