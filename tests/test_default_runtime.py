@@ -92,6 +92,38 @@ def test_default_plan_is_reproducible_and_avoids_hard_blocks() -> None:
             )
 
 
+def test_september_5_demo_plan_has_repeatable_times() -> None:
+    app = create_app(
+        clock=lambda: datetime.fromisoformat("2026-09-05T08:00:00+08:00")
+    )
+
+    response = request(app, "POST", "/plan")
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["unscheduled_tasks"] == []
+    assert [
+        (item["start_time"], item["end_time"])
+        for item in result["scheduled_tasks"]
+    ] == [
+        ("2026-09-05T08:00:00+08:00", "2026-09-05T08:30:00+08:00"),
+        ("2026-09-05T08:30:00+08:00", "2026-09-05T10:30:00+08:00"),
+        ("2026-09-05T10:30:00+08:00", "2026-09-05T11:00:00+08:00"),
+        ("2026-09-05T12:00:00+08:00", "2026-09-05T15:00:00+08:00"),
+        ("2026-09-05T15:00:00+08:00", "2026-09-05T16:00:00+08:00"),
+        ("2026-09-05T16:00:00+08:00", "2026-09-05T16:30:00+08:00"),
+        ("2026-09-05T16:30:00+08:00", "2026-09-05T17:30:00+08:00"),
+        ("2026-09-05T17:30:00+08:00", "2026-09-05T19:00:00+08:00"),
+        ("2026-09-05T19:00:00+08:00", "2026-09-05T20:00:00+08:00"),
+        ("2026-09-05T20:00:00+08:00", "2026-09-05T20:15:00+08:00"),
+        ("2026-09-05T20:15:00+08:00", "2026-09-05T20:45:00+08:00"),
+        ("2026-09-06T08:00:00+08:00", "2026-09-06T10:00:00+08:00"),
+        ("2026-09-06T10:00:00+08:00", "2026-09-06T11:00:00+08:00"),
+        ("2026-09-06T11:00:00+08:00", "2026-09-06T12:00:00+08:00"),
+        ("2026-09-06T12:00:00+08:00", "2026-09-06T12:30:00+08:00"),
+    ]
+
+
 def test_live_runtime_uses_current_time_instead_of_mock_or_previous_plan(monkeypatch) -> None:
     now = datetime.fromisoformat("2026-09-04T01:00:00+08:00")
     monkeypatch.setattr("backend.main.current_study_time", lambda: now)
