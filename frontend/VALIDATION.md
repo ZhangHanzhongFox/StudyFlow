@@ -1,28 +1,33 @@
-# Frontend validation and remaining dependencies
+# Frontend validation — September 6
 
-Run `npm test` for client/comparison tests without a backend or reset endpoint.
-Run `npm run build` for application/config typechecks and production compilation.
-The root solution config can also be checked with `tsc --noEmit -p tsconfig.json`.
+Current evidence: [VALIDATION_SEPT6.md](../docs/demo/VALIDATION_SEPT6.md).
 
-Manual regression checks on an initialized disposable runtime:
+Run `npm ci`, `npm test`, `npm run build`, and `npx tsc --noEmit -p tsconfig.json`.
+Playwright 1.62.1 is pinned in the manifest/lockfile. Install its browser once
+with `npx playwright install chromium`, then run `npm run test:e2e`.
+Alternatively set STUDYFLOW_TEST_BROWSER to an installed browser executable.
+Set STUDYFLOW_TEST_PYTHON if the Python environment is not root/.venv/bin/python.
 
-- Complete a task, then miss another task: unchanged completed and unrelated
-  placements appear as Preserved with their current canonical task status.
-- Check cross-date changes: both ends show dates, times and timezone; the page
-  identifies the browser display timezone. Flexibility-only changes are Updated.
-- Produce an unscheduled result, then submit an invalid calendar time range.
-  The previous comparison and failure details must remain visible with the error.
-- Reject Generate Plan: the specific API error and last saved result remain visible.
-- Activity shows event type, referenced entity name (or reference ID), and time,
-  not a fabricated scheduling explanation.
+The suite starts isolated API/Vite servers and fresh browser contexts. Historical
+September 3 fixture tests and September 6 default-startup tests are distinct.
+The latter reset to empty tasks/schedule, generate 15 tasks, complete one,
+miss future materials without falsely asserting movement, add an overlapping
+hard block and verify a move, add an assessment, then restore all five startup
+collections. That sequence runs three times through the UI.
 
-Remaining A/C dependency: canonical PlanningEvent does not supply a reasoning
-field. Rich backend explanations cannot be displayed until an agreed data source
-exists; do not add frontend reason/message fields to that model.
+Reset and Add Assessment forms are implemented. Reset restores the configured
+startup snapshot; it does not generate tasks. Writes lock controls through
+refresh. Failed writes retain the usable result; uncertain event writes check
+the original ID before retrying. Saved-write/failed-read recovery issues GETs
+only. Coverage includes 404, 422 details, partial scheduling, write locking,
+cross-date comparison and recovery.
 
-Current main supplies `resetDemo` (`POST /demo/reset`, when enabled) and
-`changeAssessment` (`POST /assessment-changes`). Their upstream implementations
-are retained; this merge does not add reset or assessment-edit forms.
-`/plan` remains generation, not reset. The browser integration suite requires
-Playwright and a Python environment and uses only an isolated test-server reset;
-it does not reset the product server. `npm test` remains backend-free.
+Task actions show course, duration, priority, dependency names and full placement
+dates/times. Comparison uses task identity and absolute timestamps; flexibility
+changes are Updated. Unscheduled reason/message remain visible. Activity displays
+event facts, not invented model reasoning. Five GET requests are not a multiuser
+atomic snapshot; backend state changes commit atomically before refresh.
+
+Set STUDYFLOW_QA_DIR to an existing directory for desktop/mobile screenshots.
+The suite also checks mobile horizontal overflow. Human speaking rehearsals
+and recording are separate from automated acceptance.

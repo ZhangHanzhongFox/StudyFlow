@@ -292,6 +292,7 @@ export default function App() {
     const before = data.schedule;
     const controller = new AbortController();
     setOperationState("loading");
+    setResetState("idle");
     setOperationMessage(trigger);
     setPendingRefresh(null);
     setPendingAction({ request, trigger, before });
@@ -448,7 +449,9 @@ export default function App() {
       setData(refreshed);
       clearTransientState();
       setPendingResetRefresh(false);
-      setResetMessage("The demo baseline and all five dashboard collections were restored.");
+      setResetMessage(refreshed.tasks.length === 0
+        ? "The demo baseline was restored. Select Generate Plan to create tasks and a schedule."
+        : "The demo baseline and all five dashboard collections were restored.");
       setResetState("success");
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -536,6 +539,7 @@ export default function App() {
     const controller = new AbortController();
     setPlanState("loading");
     setPlanError(null);
+    setResetState("idle");
 
     try {
       const result = await generatePlan(controller.signal);
@@ -639,7 +643,7 @@ export default function App() {
               </span>
               <div>
                 <strong>{operationState === "loading" ? "Replanning…" : operationState === "success" ? "Replan complete" : operationState === "error" ? "Replan failed" : operationState === "refresh_error" ? "Saved — refresh needed" : "Replan activity"}</strong>
-                <p>{operationMessage ?? "Complete, miss, or change a calendar block to see exactly what moves."}</p>
+                <p>{operationMessage ?? "Record progress or change a calendar block to see what moves and what stays valid."}</p>
               </div>
               {operationState === "refresh_error" && pendingRefresh && (
                 <button type="button" onClick={() => void retryPendingRefresh()} disabled={isBusy}>
@@ -826,15 +830,21 @@ export default function App() {
               <details className="task-actions">
                 <summary>Task status & actions <span>{data.tasks.length}</span></summary>
                 <div className="task-action-list">
-                  {data.tasks.map((task) => (
-                    <article key={task.id}>
-                      <div><strong>{task.name}</strong><span className={`task-status ${task.status}`}>{task.status.replaceAll("_", " ")}</span></div>
-                      <div className="task-buttons">
-                        <button type="button" onClick={() => handleTaskAction(task, "task_completed")} disabled={writesDisabled || task.status === "completed"}><CheckCircle2 size={13} /> Complete</button>
-                        <button className="missed" type="button" onClick={() => handleTaskAction(task, "task_missed")} disabled={writesDisabled || task.status === "completed" || task.status === "missed"}><XCircle size={13} /> Missed</button>
-                      </div>
-                    </article>
-                  ))}
+                  {data.tasks.map((task) => {
+                    const placement = data.schedule.find((slot) => slot.task_id === task.id);
+                    return (
+                      <article key={task.id}>
+                        <div><strong>{task.name}</strong><span className={`task-status ${task.status}`}>{task.status.replaceAll("_", " ")}</span></div>
+                        <small className="task-detail">{data.assessments.find((assessment) => assessment.id === task.assessment_id)?.course_code} · {task.duration_minutes} min estimated · Priority {task.priority}/5</small>
+                        <small className="task-detail">Requires: {task.dependencies.map((id) => tasksById.get(id)?.name ?? id).join(", ") || "No prerequisites"}</small>
+                        <small className="task-detail">{placement ? `${formatScheduleDateTime(placement.start_time)} → ${formatScheduleDateTime(placement.end_time)}` : "Not currently scheduled"}</small>
+                        <div className="task-buttons">
+                          <button type="button" onClick={() => handleTaskAction(task, "task_completed")} disabled={writesDisabled || task.status === "completed"}><CheckCircle2 size={13} /> Complete</button>
+                          <button className="missed" type="button" onClick={() => handleTaskAction(task, "task_missed")} disabled={writesDisabled || task.status === "completed" || task.status === "missed"}><XCircle size={13} /> Missed</button>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </details>
             </section>

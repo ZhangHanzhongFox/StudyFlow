@@ -1,0 +1,583 @@
+{
+  "observation": {
+    "id": "ab-fallback-missed",
+    "event_type": "task_missed",
+    "timestamp": "2026-09-06T11:30:00+08:00",
+    "reference_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe"
+  },
+  "affected_task_ids": [
+    "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+    "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+    "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe"
+  ],
+  "before": {
+    "assessments": [
+      {
+        "id": "ab-sept6-existing",
+        "course_code": "DEMO",
+        "title": "Existing study",
+        "description": "Explicit synthetic study commitments",
+        "type": "exam",
+        "unlock_at": null,
+        "deadline": "2026-09-07T18:00:00+08:00",
+        "weightage": null,
+        "is_group": false,
+        "group_size": null
+      },
+      {
+        "id": "ab-sept6-presentation",
+        "course_code": "DEMO",
+        "title": "Simulated presentation recovery",
+        "description": "Prepare slides and speaker notes, then rehearse.",
+        "type": "presentation",
+        "unlock_at": null,
+        "deadline": "2026-09-07T18:00:00+08:00",
+        "weightage": null,
+        "is_group": false,
+        "group_size": null
+      }
+    ],
+    "tasks": [
+      {
+        "id": "ab-done",
+        "assessment_id": "ab-sept6-existing",
+        "name": "Completed course review",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "ab-unrelated",
+        "assessment_id": "ab-sept6-existing",
+        "name": "Independent course review",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Confirm presentation requirements and missing details",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Create the presentation storyline and outline",
+        "duration_minutes": 30,
+        "dependencies": [
+          "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e"
+        ],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Prepare and review presentation materials",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-0d91c157-d1a6-5cdf-8659-05309aea2bde"
+        ],
+        "priority": 4,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Write and review speaker notes",
+        "duration_minutes": 90,
+        "dependencies": [
+          "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe"
+        ],
+        "priority": 4,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Run a timed rehearsal and revise",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2"
+        ],
+        "priority": 5,
+        "status": "scheduled"
+      }
+    ],
+    "calendar-blocks": [
+      {
+        "id": "ab-lecture",
+        "title": "Hard lecture",
+        "start_time": "2026-09-06T12:00:00+08:00",
+        "end_time": "2026-09-06T13:00:00+08:00",
+        "flexibility": "hard"
+      }
+    ],
+    "schedule": [
+      {
+        "id": "slot-ab-done",
+        "task_id": "ab-done",
+        "start_time": "2026-09-06T08:00:00+08:00",
+        "end_time": "2026-09-06T08:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "start_time": "2026-09-06T09:00:00+08:00",
+        "end_time": "2026-09-06T09:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "start_time": "2026-09-06T09:30:00+08:00",
+        "end_time": "2026-09-06T10:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "start_time": "2026-09-06T10:00:00+08:00",
+        "end_time": "2026-09-06T11:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "start_time": "2026-09-06T13:00:00+08:00",
+        "end_time": "2026-09-06T14:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "start_time": "2026-09-06T14:30:00+08:00",
+        "end_time": "2026-09-06T15:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "slot-ab-unrelated",
+        "task_id": "ab-unrelated",
+        "start_time": "2026-09-06T16:00:00+08:00",
+        "end_time": "2026-09-06T16:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    ],
+    "planning-events": [
+      {
+        "id": "ab-old-completion",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T08:30:00+08:00",
+        "reference_id": "ab-done"
+      },
+      {
+        "id": "ab-add-presentation",
+        "event_type": "new_assessment",
+        "timestamp": "2026-09-06T09:00:00+08:00",
+        "reference_id": "ab-sept6-presentation"
+      },
+      {
+        "id": "complete-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T09:30:00+08:00",
+        "reference_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e"
+      },
+      {
+        "id": "complete-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T10:00:00+08:00",
+        "reference_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde"
+      }
+    ]
+  },
+  "after": {
+    "assessments": [
+      {
+        "id": "ab-sept6-existing",
+        "course_code": "DEMO",
+        "title": "Existing study",
+        "description": "Explicit synthetic study commitments",
+        "type": "exam",
+        "unlock_at": null,
+        "deadline": "2026-09-07T18:00:00+08:00",
+        "weightage": null,
+        "is_group": false,
+        "group_size": null
+      },
+      {
+        "id": "ab-sept6-presentation",
+        "course_code": "DEMO",
+        "title": "Simulated presentation recovery",
+        "description": "Prepare slides and speaker notes, then rehearse.",
+        "type": "presentation",
+        "unlock_at": null,
+        "deadline": "2026-09-07T18:00:00+08:00",
+        "weightage": null,
+        "is_group": false,
+        "group_size": null
+      }
+    ],
+    "tasks": [
+      {
+        "id": "ab-done",
+        "assessment_id": "ab-sept6-existing",
+        "name": "Completed course review",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "ab-unrelated",
+        "assessment_id": "ab-sept6-existing",
+        "name": "Independent course review",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Confirm presentation requirements and missing details",
+        "duration_minutes": 30,
+        "dependencies": [],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Create the presentation storyline and outline",
+        "duration_minutes": 30,
+        "dependencies": [
+          "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e"
+        ],
+        "priority": 3,
+        "status": "completed"
+      },
+      {
+        "id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Prepare and review presentation materials",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-0d91c157-d1a6-5cdf-8659-05309aea2bde"
+        ],
+        "priority": 4,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Write and review speaker notes",
+        "duration_minutes": 90,
+        "dependencies": [
+          "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe"
+        ],
+        "priority": 4,
+        "status": "scheduled"
+      },
+      {
+        "id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "assessment_id": "ab-sept6-presentation",
+        "name": "Run a timed rehearsal and revise",
+        "duration_minutes": 60,
+        "dependencies": [
+          "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2"
+        ],
+        "priority": 5,
+        "status": "scheduled"
+      }
+    ],
+    "calendar-blocks": [
+      {
+        "id": "ab-lecture",
+        "title": "Hard lecture",
+        "start_time": "2026-09-06T12:00:00+08:00",
+        "end_time": "2026-09-06T13:00:00+08:00",
+        "flexibility": "hard"
+      }
+    ],
+    "schedule": [
+      {
+        "id": "slot-ab-done",
+        "task_id": "ab-done",
+        "start_time": "2026-09-06T08:00:00+08:00",
+        "end_time": "2026-09-06T08:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "start_time": "2026-09-06T09:00:00+08:00",
+        "end_time": "2026-09-06T09:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "start_time": "2026-09-06T09:30:00+08:00",
+        "end_time": "2026-09-06T10:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "start_time": "2026-09-06T13:00:00+08:00",
+        "end_time": "2026-09-06T14:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "start_time": "2026-09-06T14:00:00+08:00",
+        "end_time": "2026-09-06T15:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "slot-ab-unrelated",
+        "task_id": "ab-unrelated",
+        "start_time": "2026-09-06T16:00:00+08:00",
+        "end_time": "2026-09-06T16:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "start_time": "2026-09-06T16:30:00+08:00",
+        "end_time": "2026-09-06T17:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    ],
+    "planning-events": [
+      {
+        "id": "ab-old-completion",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T08:30:00+08:00",
+        "reference_id": "ab-done"
+      },
+      {
+        "id": "ab-add-presentation",
+        "event_type": "new_assessment",
+        "timestamp": "2026-09-06T09:00:00+08:00",
+        "reference_id": "ab-sept6-presentation"
+      },
+      {
+        "id": "complete-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T09:30:00+08:00",
+        "reference_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e"
+      },
+      {
+        "id": "complete-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "event_type": "task_completed",
+        "timestamp": "2026-09-06T10:00:00+08:00",
+        "reference_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde"
+      },
+      {
+        "id": "ab-fallback-missed",
+        "event_type": "task_missed",
+        "timestamp": "2026-09-06T11:30:00+08:00",
+        "reference_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe"
+      }
+    ]
+  },
+  "changes": [
+    {
+      "task_id": "ab-done",
+      "name": "Completed course review",
+      "outcome": "preserved",
+      "before": {
+        "id": "slot-ab-done",
+        "task_id": "ab-done",
+        "start_time": "2026-09-06T08:00:00+08:00",
+        "end_time": "2026-09-06T08:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "slot-ab-done",
+        "task_id": "ab-done",
+        "start_time": "2026-09-06T08:00:00+08:00",
+        "end_time": "2026-09-06T08:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "ab-unrelated",
+      "name": "Independent course review",
+      "outcome": "preserved",
+      "before": {
+        "id": "slot-ab-unrelated",
+        "task_id": "ab-unrelated",
+        "start_time": "2026-09-06T16:00:00+08:00",
+        "end_time": "2026-09-06T16:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "slot-ab-unrelated",
+        "task_id": "ab-unrelated",
+        "start_time": "2026-09-06T16:00:00+08:00",
+        "end_time": "2026-09-06T16:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+      "name": "Create the presentation storyline and outline",
+      "outcome": "preserved",
+      "before": {
+        "id": "scheduled-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "start_time": "2026-09-06T09:30:00+08:00",
+        "end_time": "2026-09-06T10:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "scheduled-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "start_time": "2026-09-06T09:30:00+08:00",
+        "end_time": "2026-09-06T10:00:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+      "name": "Write and review speaker notes",
+      "outcome": "moved",
+      "before": {
+        "id": "scheduled-task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "start_time": "2026-09-06T13:00:00+08:00",
+        "end_time": "2026-09-06T14:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "scheduled-task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "start_time": "2026-09-06T14:00:00+08:00",
+        "end_time": "2026-09-06T15:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+      "name": "Confirm presentation requirements and missing details",
+      "outcome": "preserved",
+      "before": {
+        "id": "scheduled-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "start_time": "2026-09-06T09:00:00+08:00",
+        "end_time": "2026-09-06T09:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "scheduled-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "start_time": "2026-09-06T09:00:00+08:00",
+        "end_time": "2026-09-06T09:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+      "name": "Run a timed rehearsal and revise",
+      "outcome": "moved",
+      "before": {
+        "id": "scheduled-task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "start_time": "2026-09-06T14:30:00+08:00",
+        "end_time": "2026-09-06T15:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "scheduled-task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "start_time": "2026-09-06T16:30:00+08:00",
+        "end_time": "2026-09-06T17:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    },
+    {
+      "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+      "name": "Prepare and review presentation materials",
+      "outcome": "moved",
+      "before": {
+        "id": "scheduled-task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "start_time": "2026-09-06T10:00:00+08:00",
+        "end_time": "2026-09-06T11:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      "after": {
+        "id": "scheduled-task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "start_time": "2026-09-06T13:00:00+08:00",
+        "end_time": "2026-09-06T14:00:00+08:00",
+        "flexibility": "flexible"
+      }
+    }
+  ],
+  "result": {
+    "scheduled_tasks": [
+      {
+        "id": "slot-ab-done",
+        "task_id": "ab-done",
+        "start_time": "2026-09-06T08:00:00+08:00",
+        "end_time": "2026-09-06T08:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "task_id": "task-b911ff1a-0ec2-5d4a-b162-d3c6f0fc687e",
+        "start_time": "2026-09-06T09:00:00+08:00",
+        "end_time": "2026-09-06T09:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "task_id": "task-0d91c157-d1a6-5cdf-8659-05309aea2bde",
+        "start_time": "2026-09-06T09:30:00+08:00",
+        "end_time": "2026-09-06T10:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "task_id": "task-ef0fff30-1a50-52c7-88ce-8299e76d3afe",
+        "start_time": "2026-09-06T13:00:00+08:00",
+        "end_time": "2026-09-06T14:00:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "task_id": "task-68c34d58-172a-5dc9-94ba-cc92826dbfb2",
+        "start_time": "2026-09-06T14:00:00+08:00",
+        "end_time": "2026-09-06T15:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "slot-ab-unrelated",
+        "task_id": "ab-unrelated",
+        "start_time": "2026-09-06T16:00:00+08:00",
+        "end_time": "2026-09-06T16:30:00+08:00",
+        "flexibility": "flexible"
+      },
+      {
+        "id": "scheduled-task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "task_id": "task-cbab75a2-e73b-56b0-933b-55616fabf3ce",
+        "start_time": "2026-09-06T16:30:00+08:00",
+        "end_time": "2026-09-06T17:30:00+08:00",
+        "flexibility": "flexible"
+      }
+    ],
+    "unscheduled_tasks": []
+  },
+  "disclosure": "Synthetic September 6 scenario; observation explicitly simulated at 11:30 +08:00."
+}
