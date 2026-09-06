@@ -48,12 +48,21 @@ async function calendarForm(end = "2026-09-03T10:00") {
   await page.getByLabel("Ends").fill(end);
 }
 
+async function assessmentForm({ title = "New presentation", deadline = "2026-09-06T18:00" } = {}) {
+  await page.getByLabel("Course code").fill("CS9999");
+  await page.getByLabel("Assessment title").fill(title);
+  await page.getByLabel("Type").selectOption("presentation");
+  await page.getByLabel("Deadline").fill(deadline);
+  await page.getByLabel("Requirements / description").fill("Create and deliver a concise technical presentation.");
+}
+
 async function assertWriteControlsDisabled(taskName = "task-slides") {
   assert.equal(await page.locator(".generate-button").isDisabled(), true);
   assert.equal(await taskRow(taskName).getByRole("button", { name: "Complete", exact: true }).isDisabled(), true);
   assert.equal(await taskRow(taskName).getByRole("button", { name: "Missed", exact: true }).isDisabled(), true);
   assert.equal(await page.getByLabel("Title", { exact: true }).isDisabled(), true);
   assert.equal(await page.locator(".calendar-submit").isDisabled(), true);
+  assert.equal(await page.locator(".assessment-submit").isDisabled(), true);
 }
 
 async function assertPreserved() {
@@ -346,4 +355,97 @@ test("default runtime generates today's sessions even when mock calendar dates a
   const schedule = await response.json();
   assert.equal(schedule[0].start_time, "2026-09-04T08:00:00+08:00");
   assert.ok(schedule.every((item) => Date.parse(item.start_time) >= Date.parse("2026-09-04T01:00:00+08:00")));
+});
+
+test("Demo Reset restores baseline, clears old comparisons, and permits another replan", async () => {
+  await taskRow("task-slides").getByRole("button", { name: "Missed", exact: true }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  assert.ok(await page.locator(".schedule-changes article").count() > 0);
+  page.once("dialog", async (dialog) => { assert.match(dialog.message(), /configured baseline/i); await dialog.accept(); });
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Demo restored", { exact: true }).waitFor();
+  assert.equal(await page.locator(".schedule-changes").count(), 0);
+  assert.deepEqual(await get("tasks"), fixture.initial_state.tasks);
+  assert.deepEqual(await get("schedule"), fixture.initial_state.scheduled_tasks);
+  assert.deepEqual(await get("planning-events"), fixture.initial_state.planning_events);
+  await taskRow("task-slides").getByRole("button", { name: "Missed", exact: true }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+});
+
+test("disabled reset endpoint explains how to recover", async () => {
+  await page.route("**/api/demo/reset", (route) => route.fulfill({ status: 404, json: { detail: "Not Found" } }), { times: 1 });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Demo reset unavailable", { exact: true }).waitFor();
+  assert.match(await page.locator(".reset-notice").innerText(), /demo\/development mode/i);
+});
+
+test("reset saved with failed refresh retries reads only", async () => {
+  let resetSaved = false; let failRead = true; let resetPosts = 0;
+  await page.route("**/api/demo/reset", async (route) => { resetPosts++; const response = await route.fetch(); resetSaved = true; await route.fulfill({ response }); });
+  await page.route("**/api/tasks", async (route) => {
+    if (resetSaved && failRead) { failRead = false; await route.fulfill({ status: 503 }); } else await route.continue();
+  });
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Reset saved — refresh needed", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Retry refresh", exact: true }).click();
+  await page.getByText("Demo restored", { exact: true }).waitFor();
+  assert.equal(resetPosts, 1);
+});
+
+test("Add Assessment creates backend work, shows partial failures, validates, and resets", async () => {
+  await page.getByText("Add assessment", { exact: true }).click();
+  const before = (await get("assessments")).length;
+  await assessmentForm();
+  await page.getByRole("button", { name: "Add assessment & plan" }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  assert.equal((await get("assessments")).length, before + 1);
+  assert.ok((await get("tasks")).some((task) => task.assessment_id.startsWith("assessment-")));
+
+  await assessmentForm({ title: "Urgent presentation", deadline: "2026-09-03T11:01" });
+  await page.getByRole("button", { name: "Add assessment & plan" }).click();
+  await page.getByText(/task\(s\) could not be scheduled/).waitFor();
+  assert.match(await page.locator(".operation-failures").innerText(), /(deadline constraint|dependency conflict)/i);
+
+  await page.route("**/api/assessment-changes", (route) => route.fulfill({ status: 422, json: { detail: [
+    { loc: ["body", "assessment", "deadline"], msg: "deadline must be timezone-aware" },
+  ] } }), { times: 1 });
+  await assessmentForm({ title: "Invalid assessment" });
+  await page.getByRole("button", { name: "Add assessment & plan" }).click();
+  await page.getByText("Replan failed", { exact: true }).waitFor();
+  assert.match(await page.locator(".replan-notice-heading").innerText(), /body\.assessment\.deadline/);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Demo restored", { exact: true }).waitFor();
+  assert.equal((await get("assessments")).length, before);
+  assert.equal(await page.getByLabel("Assessment title").inputValue(), "");
+});
+
+test("full judge rehearsal runs reset, missed, calendar, assessment, and reset entirely in the UI", async () => {
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Demo restored", { exact: true }).waitFor();
+
+  await taskRow("task-slides").getByRole("button", { name: "Missed", exact: true }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  assert.ok(await page.locator(".schedule-changes article").count() > 0);
+
+  await calendarForm();
+  await page.getByRole("button", { name: "Add & replan" }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  assert.ok((await get("calendar-blocks")).some((block) => block.title === "Extra lecture"));
+
+  await page.getByText("Add assessment", { exact: true }).click();
+  await assessmentForm({ title: "Judge demo presentation", deadline: "2026-09-06T18:00" });
+  await page.getByRole("button", { name: "Add assessment & plan" }).click();
+  await page.getByText("Replan complete", { exact: true }).waitFor();
+  assert.ok((await get("assessments")).some((assessment) => assessment.title === "Judge demo presentation"));
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+  await page.getByText("Demo restored", { exact: true }).waitFor();
+  assert.deepEqual(await get("assessments"), fixture.initial_state.assessments);
+  assert.deepEqual(await get("calendar-blocks"), fixture.initial_state.calendar_blocks);
 });

@@ -17,11 +17,13 @@ import {
 } from "lucide-react";
 import {
   ApiError,
+  changeAssessment,
   changeCalendar,
   compareSchedules,
   generatePlan,
   getDashboardData,
   replan,
+  resetDemo,
 } from "./api";
 import type {
   Assessment,
@@ -33,6 +35,7 @@ import type {
 } from "./types";
 
 type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
+type AssessmentChangeRequest = { event: PlanningEvent; assessment: Assessment };
 
 const typeLabels: Record<Assessment["type"], string> = {
   presentation: "Presentation",
@@ -93,6 +96,11 @@ function eventId(prefix: string) {
 function calendarId() {
   const unique = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `calendar-${unique}`;
+}
+
+function assessmentId() {
+  const unique = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `assessment-${unique}`;
 }
 
 function apiErrorMessage(reason: unknown) {
@@ -161,7 +169,7 @@ export default function App() {
     before: ScheduledTask[];
   } | null>(null);
   const [pendingAction, setPendingAction] = useState<{
-    request: PlanningEvent | CalendarChangeRequest;
+    request: PlanningEvent | CalendarChangeRequest | AssessmentChangeRequest;
     trigger: string;
     before: ScheduledTask[];
   } | null>(null);
@@ -170,6 +178,14 @@ export default function App() {
   const [calendarStart, setCalendarStart] = useState("");
   const [calendarEnd, setCalendarEnd] = useState("");
   const [calendarFlexibility, setCalendarFlexibility] = useState<"hard" | "soft" | "flexible">("hard");
+  const [resetState, setResetState] = useState<OperationState>("idle");
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [pendingResetRefresh, setPendingResetRefresh] = useState(false);
+  const [assessmentCourse, setAssessmentCourse] = useState("");
+  const [assessmentTitle, setAssessmentTitle] = useState("");
+  const [assessmentDescription, setAssessmentDescription] = useState("");
+  const [assessmentType, setAssessmentType] = useState<"presentation" | "exam" | "midterm" | "coding_assignment">("presentation");
+  const [assessmentDeadline, setAssessmentDeadline] = useState("");
   // React state updates are asynchronous; the ref also blocks same-tick submissions.
   const actionInFlight = useRef(false);
   const now = useMemo(() => new Date(), []);
@@ -213,8 +229,8 @@ export default function App() {
     [data],
   );
   const operationLoading = operationState === "loading";
-  const isBusy = loading || planState === "loading" || operationLoading;
-  const writesDisabled = isBusy || Boolean(error) || Boolean(pendingRefresh) || Boolean(pendingPlanRefresh);
+  const isBusy = loading || planState === "loading" || operationLoading || resetState === "loading";
+  const writesDisabled = isBusy || Boolean(error) || Boolean(pendingRefresh) || Boolean(pendingPlanRefresh) || pendingResetRefresh;
 
   const eventReference = (event: PlanningEvent) => {
     if (event.event_type === "task_completed" || event.event_type === "task_missed") {
@@ -267,10 +283,10 @@ export default function App() {
   }, []);
 
   const submitPlanningAction = useCallback(async (
-    request: PlanningEvent | CalendarChangeRequest,
+    request: PlanningEvent | CalendarChangeRequest | AssessmentChangeRequest,
     trigger: string,
   ) => {
-    if (!data || writesDisabled || actionInFlight.current) return;
+    if (!data || writesDisabled || actionInFlight.current) return false;
     actionInFlight.current = true;
 
     const before = data.schedule;
@@ -283,12 +299,16 @@ export default function App() {
     try {
       const result = "calendar_block" in request
         ? await changeCalendar(request, controller.signal)
-        : await replan(request, controller.signal);
+        : "assessment" in request
+          ? await changeAssessment(request, controller.signal)
+          : await replan(request, controller.signal);
       await applyPlanningResult(result, before, trigger);
+      return true;
     } catch (reason: unknown) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
       setOperationMessage(apiErrorMessage(reason));
       setOperationState("error");
+      return false;
     } finally {
       actionInFlight.current = false;
     }
@@ -311,7 +331,7 @@ export default function App() {
     const controller = new AbortController();
     const submittedEvent = "calendar_block" in pendingAction.request
       ? pendingAction.request.event
-      : pendingAction.request;
+      : "assessment" in pendingAction.request ? pendingAction.request.event : pendingAction.request;
     setOperationState("loading");
     setOperationMessage("Checking whether the previous submission was already saved…");
 
@@ -321,7 +341,9 @@ export default function App() {
       if (!alreadySaved) {
         const result = "calendar_block" in pendingAction.request
           ? await changeCalendar(pendingAction.request, controller.signal)
-          : await replan(pendingAction.request, controller.signal);
+          : "assessment" in pendingAction.request
+            ? await changeAssessment(pendingAction.request, controller.signal)
+            : await replan(pendingAction.request, controller.signal);
         await applyPlanningResult(result, pendingAction.before, pendingAction.trigger);
         return;
       }
@@ -410,6 +432,69 @@ export default function App() {
     };
     void submitPlanningAction(change, `${calendarTitle.trim()} changed the calendar`);
   }, [calendarEnd, calendarFlexibility, calendarSelection, calendarStart, calendarTitle, submitPlanningAction]);
+
+  const clearTransientState = useCallback(() => {
+    setPlanState("idle"); setPlanError(null); setPlanResult(null); setChangeSummary(null);
+    setOperationState("idle"); setOperationMessage(null); setOperationResult(null); setScheduleChanges(null);
+    setPendingRefresh(null); setPendingPlanRefresh(null); setPendingAction(null);
+    setCalendarSelection("new"); setCalendarTitle(""); setCalendarStart(""); setCalendarEnd(""); setCalendarFlexibility("hard");
+    setAssessmentCourse(""); setAssessmentTitle(""); setAssessmentDescription(""); setAssessmentType("presentation"); setAssessmentDeadline("");
+  }, []);
+
+  const applyResetRefresh = useCallback(async () => {
+    const controller = new AbortController();
+    try {
+      const refreshed = await getDashboardData(controller.signal);
+      setData(refreshed);
+      clearTransientState();
+      setPendingResetRefresh(false);
+      setResetMessage("The demo baseline and all five dashboard collections were restored.");
+      setResetState("success");
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setPendingResetRefresh(true);
+      setResetMessage("Reset completed, but the refreshed dashboard could not be loaded. Retry refresh; the reset will not run again.");
+      setResetState("refresh_error");
+    }
+  }, [clearTransientState]);
+
+  const handleReset = useCallback(async () => {
+    if (writesDisabled || actionInFlight.current || !window.confirm("Reset this demo? Current demo changes and activity will be replaced by the configured baseline.")) return;
+    actionInFlight.current = true;
+    setResetState("loading"); setResetMessage("Restoring the configured demo baseline…");
+    try {
+      await resetDemo(new AbortController().signal);
+      await applyResetRefresh();
+    } catch (reason: unknown) {
+      if (reason instanceof DOMException && reason.name === "AbortError") return;
+      setResetMessage(reason instanceof ApiError && reason.status === 404
+        ? "Demo Reset is not enabled on this server. Start it in demo/development mode with reset enabled."
+        : apiErrorMessage(reason));
+      setResetState("error");
+    } finally { actionInFlight.current = false; }
+  }, [applyResetRefresh, writesDisabled]);
+
+  const retryResetRefresh = useCallback(async () => {
+    if (!pendingResetRefresh || isBusy || actionInFlight.current) return;
+    actionInFlight.current = true; setResetState("loading");
+    try { await applyResetRefresh(); } finally { actionInFlight.current = false; }
+  }, [applyResetRefresh, isBusy, pendingResetRefresh]);
+
+  const handleAssessmentSubmit = useCallback(async (formEvent: React.FormEvent) => {
+    formEvent.preventDefault();
+    if (!assessmentCourse.trim() || !assessmentTitle.trim() || !assessmentDescription.trim() || !assessmentDeadline) return;
+    const id = assessmentId();
+    const assessment: Assessment = {
+      id, course_code: assessmentCourse.trim(), title: assessmentTitle.trim(), description: assessmentDescription.trim(),
+      type: assessmentType, unlock_at: null, deadline: new Date(assessmentDeadline).toISOString(),
+      weightage: null, is_group: false, group_size: null,
+    };
+    const succeeded = await submitPlanningAction({
+      event: { id: eventId("new-assessment"), event_type: "new_assessment", timestamp: new Date().toISOString(), reference_id: id },
+      assessment,
+    }, `${assessment.title} was added`);
+    if (succeeded) { setAssessmentCourse(""); setAssessmentTitle(""); setAssessmentDescription(""); setAssessmentDeadline(""); setAssessmentType("presentation"); }
+  }, [assessmentCourse, assessmentDeadline, assessmentDescription, assessmentTitle, assessmentType, submitPlanningAction]);
 
   const applyGeneratedPlan = useCallback(async (result: SchedulingResult, before: ScheduledTask[]) => {
     try {
@@ -506,8 +591,20 @@ export default function App() {
               {planState === "loading" ? <RefreshCw className="spin" size={16} /> : <WandSparkles size={16} />}
               {planState === "loading" ? (pendingPlanRefresh ? "Refreshing…" : "Generating…") : data && (data.tasks.length > 0 || data.schedule.length > 0) ? "Regenerate Plan" : "Generate Plan"}
             </button>
+            <button className="reset-button" type="button" onClick={() => void handleReset()} disabled={writesDisabled}>
+              <RotateCcw className={resetState === "loading" ? "spin" : ""} size={15} />
+              {resetState === "loading" ? (pendingResetRefresh ? "Refreshing…" : "Resetting…") : "Demo Reset"}
+            </button>
           </div>
         </div>
+
+        {resetState !== "idle" && (
+          <section className={`reset-notice ${resetState}`} role={resetState === "error" ? "alert" : "status"} aria-live="polite">
+            <div><strong>{resetState === "success" ? "Demo restored" : resetState === "refresh_error" ? "Reset saved — refresh needed" : resetState === "error" ? "Demo reset unavailable" : "Resetting demo"}</strong><p>{resetMessage}</p></div>
+            {resetState === "refresh_error" && <button type="button" onClick={() => void retryResetRefresh()} disabled={isBusy}><RefreshCw size={14} /> Retry refresh</button>}
+            {resetState === "error" && <button type="button" onClick={() => void handleReset()} disabled={writesDisabled}><RefreshCw size={14} /> Retry reset</button>}
+          </section>
+        )}
 
         <section className={`change-notice ${planState}`} aria-live="polite">
           <span className="change-notice-icon">
@@ -608,6 +705,25 @@ export default function App() {
               </div>
             )}
           </section>
+        )}
+
+        {data && (
+          <details className="action-drawer assessment-drawer">
+            <summary><BookOpen size={17} /> Add assessment</summary>
+            <form className="assessment-editor" onSubmit={(event) => void handleAssessmentSubmit(event)}>
+              <label>Course code<input required value={assessmentCourse} onChange={(event) => setAssessmentCourse(event.target.value)} placeholder="CS1010" disabled={writesDisabled} /></label>
+              <label>Assessment title<input required value={assessmentTitle} onChange={(event) => setAssessmentTitle(event.target.value)} placeholder="Final presentation" disabled={writesDisabled} /></label>
+              <label>Type<select value={assessmentType} onChange={(event) => setAssessmentType(event.target.value as typeof assessmentType)} disabled={writesDisabled}>
+                <option value="presentation">Presentation</option><option value="exam">Exam</option><option value="midterm">Midterm</option><option value="coding_assignment">Coding assignment</option>
+              </select></label>
+              <label>Deadline<input required type="datetime-local" value={assessmentDeadline} onChange={(event) => setAssessmentDeadline(event.target.value)} disabled={writesDisabled} /></label>
+              <label className="assessment-description">Requirements / description<textarea required value={assessmentDescription} onChange={(event) => setAssessmentDescription(event.target.value)} placeholder="Describe the deliverable and required work." disabled={writesDisabled} /></label>
+              <p className="form-defaults">Defaults shown in the request: available immediately · individual work · weightage not provided.</p>
+              <button className="assessment-submit" type="submit" disabled={writesDisabled || !assessmentCourse.trim() || !assessmentTitle.trim() || !assessmentDescription.trim() || !assessmentDeadline}>
+                {operationLoading ? <RefreshCw className="spin" size={15} /> : <BookOpen size={15} />} Add assessment & plan
+              </button>
+            </form>
+          </details>
         )}
 
         {data && (
