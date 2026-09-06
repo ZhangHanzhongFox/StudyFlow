@@ -1,5 +1,9 @@
 # StudyFlow
 
+**September 6 demo:** start with the [operator runbook](docs/demo/RUNBOOK.md),
+[video script](docs/demo/VIDEO_SCRIPT.md), and [verification record](docs/demo/VALIDATION_SEPT6.md).
+The default demo starts with no tasks: **Demo Reset → Generate Plan**.
+
 StudyFlow turns university assessment deadlines into executable study
 workflows, schedules them around existing commitments, observes progress, and
 replans when circumstances change.
@@ -89,16 +93,38 @@ python -m pytest -o addopts='' -q
 cd frontend
 npm test
 npm run build
-# Optional browser regression dependencies (no manifest/lockfile changes):
-npm install --no-save --package-lock=false playwright@1.62.1
+# Playwright is pinned in devDependencies; download its browser once while online:
 npx playwright install chromium
 npm run test:e2e
 ```
 
 Browser tests create their own isolated backend and Vite server. Set
 `STUDYFLOW_TEST_PYTHON` to an absolute Python path if it is not `.venv/bin/python`.
-They exercise the existing UI; reset/new-assessment controls still require D's
-integration. The HTTP client helpers already exist.
+They exercise Complete/Missed, calendar changes, Add Assessment, Demo Reset,
+write recovery and three default-startup rehearsals. To use an installed browser,
+set `STUDYFLOW_TEST_BROWSER` to its executable instead of downloading Chromium.
+
+### Start the prepared recording setup
+
+After installing dependencies and running `cd frontend && npm run build`,
+return to the repository root:
+
+```bash
+.venv/bin/python -m scripts.run_demo
+```
+
+This starts one offline reset-enabled API on port 8000 and a local production
+preview on port 5173 with the existing `/api` proxy. Open
+`http://127.0.0.1:5173`; Ctrl-C stops both owned services. Free both ports first.
+Node 24 must be on PATH, or set `STUDYFLOW_NODE` to its absolute executable.
+The script uses the Python environment that invoked it. This is local hosting,
+not an external deployment. Do not run it alongside the development servers.
+
+Task actions show course, estimated minutes, priority, prerequisites and full
+scheduled dates/times, including future days. Marking future work Missed may
+preserve a valid slot. To demonstrate a necessary move, add a hard calendar
+block over that visible slot. The runbook gives the exact UI flow and a clearly
+labeled static fallback for a simulated late observation.
 
 For a **disposable reset-enabled demo server**, run from the root:
 

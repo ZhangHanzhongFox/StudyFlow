@@ -423,7 +423,7 @@ test("Add Assessment creates backend work, shows partial failures, validates, an
   assert.equal(await page.getByLabel("Assessment title").inputValue(), "");
 });
 
-test("full judge rehearsal runs reset, missed, calendar, assessment, and reset entirely in the UI", async () => {
+test("historical fixture rehearsal runs reset, missed, calendar, assessment, and reset entirely in the UI", async () => {
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
   await page.getByText("Demo restored", { exact: true }).waitFor();
@@ -449,3 +449,84 @@ test("full judge rehearsal runs reset, missed, calendar, assessment, and reset e
   assert.deepEqual(await get("assessments"), fixture.initial_state.assessments);
   assert.deepEqual(await get("calendar-blocks"), fixture.initial_state.calendar_blocks);
 });
+
+for (let cycle = 1; cycle <= 3; cycle++) {
+  test(`default startup rehearsal ${cycle}: empty reset, plan, complete, missed, calendar, assessment, reset`, async () => {
+    await page.route("**/api/**", async (route) => {
+      const url = new URL(route.request().url());
+      url.pathname = url.pathname.replace("/api/", "/api/demo-live/");
+      await route.continue({ url: url.toString() });
+    });
+    const read = async (resource) => (await fetch(`${apiUrl}/demo-live/${resource}`)).json();
+    await page.clock.setFixedTime(new Date("2026-09-06T14:00:00+08:00"));
+    await page.reload();
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+    await page.getByText("Demo restored", { exact: true }).waitFor();
+    const baseline = {};
+    for (const resource of ["assessments", "tasks", "calendar-blocks", "schedule", "planning-events"]) {
+      baseline[resource] = await read(resource);
+    }
+    assert.deepEqual(baseline.tasks, []);
+    assert.deepEqual(baseline.schedule, []);
+    await page.getByRole("button", { name: "Generate Plan", exact: true }).click();
+    await page.getByText("Plan updated", { exact: true }).waitFor();
+    const tasks = await read("tasks");
+    const schedule = await read("schedule");
+    assert.equal(tasks.length, 15);
+    assert.equal(schedule.length, 15);
+    if (process.env.STUDYFLOW_QA_DIR && cycle === 1) {
+      await page.locator(".dashboard-grid").screenshot({ path: path.join(process.env.STUDYFLOW_QA_DIR, "dashboard.png") });
+    }
+    const presentation = baseline.assessments.find((a) => a.type === "presentation");
+    const chain = tasks.filter((t) => t.assessment_id === presentation.id);
+    const rootTask = chain.find((t) => t.dependencies.length === 0);
+    const outline = chain.find((t) => t.dependencies.includes(rootTask.id));
+    const materials = chain.find((t) => t.dependencies.includes(outline.id));
+    await openActions();
+    assert.match(await taskRow(materials.name).innerText(), /60 min estimated/);
+    assert.match(await taskRow(materials.name).innerText(), /Requires: Create the presentation storyline and outline/);
+    await taskRow(rootTask.name).getByRole("button", { name: "Complete", exact: true }).click();
+    await page.getByText("Replan complete", { exact: true }).waitFor();
+    await taskRow(materials.name).getByRole("button", { name: "Missed", exact: true }).click();
+    await page.getByText("Replan complete", { exact: true }).waitFor();
+    assert.equal((await read("tasks")).find((t) => t.id === rootTask.id).status, "completed");
+    // At 14:00 these future placements remain valid: do not promise movement.
+    assert.deepEqual(await read("schedule"), schedule);
+    await page.getByText("No schedule slots needed to move.", { exact: false }).waitFor();
+
+    const oldMaterials = schedule.find((s) => s.task_id === materials.id);
+    const localInput = (iso) => new Date(Date.parse(iso) + 8 * 3600000).toISOString().slice(0, 16);
+    await page.getByLabel("Title", { exact: true }).fill("Extra lecture");
+    await page.getByLabel("Starts").fill(localInput(oldMaterials.start_time));
+    await page.getByLabel("Ends").fill(localInput(oldMaterials.end_time));
+    await page.getByRole("button", { name: "Add & replan" }).click();
+    await page.getByText("Replan complete", { exact: true }).waitFor();
+    const afterCalendar = await read("schedule");
+    assert.notEqual(afterCalendar.find((s) => s.task_id === materials.id)?.start_time, oldMaterials.start_time);
+    assert.deepEqual(afterCalendar.find((s) => s.task_id === rootTask.id), schedule.find((s) => s.task_id === rootTask.id));
+    assert.ok(await page.locator(".change-kind").filter({ hasText: /^Moved$/ }).count() > 0);
+    for (const s of afterCalendar) {
+      assert.ok(Date.parse(s.end_time) <= Date.parse(oldMaterials.start_time) || Date.parse(s.start_time) >= Date.parse(oldMaterials.end_time));
+    }
+    await page.getByText("Add assessment", { exact: true }).click();
+    await assessmentForm({ title: "Judge demo presentation", deadline: "2026-09-15T18:00" });
+    await page.getByRole("button", { name: "Add assessment & plan" }).click();
+    await page.getByText("Replan complete", { exact: true }).waitFor();
+    assert.equal((await read("assessments")).length, baseline.assessments.length + 1);
+    assert.equal((await read("tasks")).length, 20);
+
+    if (process.env.STUDYFLOW_QA_DIR && cycle === 1) {
+      await page.screenshot({ path: path.join(process.env.STUDYFLOW_QA_DIR, "desktop.png"), fullPage: true });
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+      await page.screenshot({ path: path.join(process.env.STUDYFLOW_QA_DIR, "mobile.png"), fullPage: true });
+    }
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Demo Reset", exact: true }).click();
+    await page.getByText("Demo restored", { exact: true }).waitFor();
+    for (const resource of Object.keys(baseline)) assert.deepEqual(await read(resource), baseline[resource]);
+    assert.equal(await page.locator(".schedule-changes").count(), 0);
+    await page.getByRole("button", { name: "Generate Plan", exact: true }).waitFor();
+  });
+}

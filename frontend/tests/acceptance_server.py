@@ -35,6 +35,10 @@ app = create_app(state, PlanningPipeline(
 app.mount("/live", create_app(
     clock=lambda: datetime.fromisoformat("2026-09-04T01:00:00+08:00"),
 ))
+app.mount("/demo-live", create_app(
+    clock=lambda: datetime.fromisoformat("2026-09-06T14:00:00+08:00"),
+    environment="demo", demo_reset_enabled=True,
+))
 
 
 @app.post("/test/reset")

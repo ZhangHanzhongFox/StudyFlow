@@ -1,5 +1,7 @@
 # Role D handoff — 2026-09-05
 
+> Historical September 5 snapshot. Current code, tests and presenter materials are recorded in [VALIDATION_SEPT6.md](VALIDATION_SEPT6.md); use the September 6 deck and current runbook.
+
 ## Delivered
 
 - Demo Reset UI using the existing `POST /demo/reset` client helper, including confirmation, write locking, gated-endpoint guidance, and GET-only recovery after a confirmed write.
