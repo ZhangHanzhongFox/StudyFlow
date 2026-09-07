@@ -113,12 +113,27 @@ return to the repository root:
 .venv/bin/python -m scripts.run_demo
 ```
 
-This starts one offline reset-enabled API on port 8000 and a local production
+By default (with no provider configured), this starts one offline reset-enabled API on port 8000 and a local production
 preview on port 5173 with the existing `/api` proxy. Open
 `http://127.0.0.1:5173`; Ctrl-C stops both owned services. Free both ports first.
 Node 24 must be on PATH, or set `STUDYFLOW_NODE` to its absolute executable.
 The script uses the Python environment that invoked it. This is local hosting,
 not an external deployment. Do not run it alongside the development servers.
+
+To use real LLM decomposition, configure valid AWS credentials in the same
+terminal (see [Connect Amazon Bedrock](#connect-amazon-bedrock-nova-lite)), then run:
+
+```bash
+.venv/bin/python -m scripts.run_demo --llm
+```
+
+This performs one real Bedrock check before starting either service and stops
+if that check fails. It uses the configured model, defaulting to Nova Lite.
+The launcher now honors `STUDYFLOW_LLM_PROVIDER`; `--llm` explicitly selects
+Bedrock and `--offline` explicitly selects templates. `.env` is not loaded
+automatically. After startup, Reset then Generate Plan to replace prior tasks.
+Individual planning requests still fall back to templates on provider or output
+validation failures; inspect backend warnings for `using deterministic fallback`.
 
 Task actions show course, estimated minutes, priority, prerequisites and full
 scheduled dates/times, including future days. Marking future work Missed may
